@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.3
+--  PRISON ESP  v2.4
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -2036,6 +2036,25 @@ auraConn = RunService.Heartbeat:Connect(function()
         local humP = chrP and chrP:FindFirstChildOfClass("Humanoid")
         local rootP = chrP and chrP:FindFirstChild("HumanoidRootPart")
         if chrP and humP and rootP then
+            -- ДЕРЖИМ СЕБЯ НА НОГАХ: вражеский удар роняет в регдолл,
+            -- и аура стопорится. Поднимаемся и рвём регдолл-связи.
+            pcall(function()
+                local st = humP:GetState()
+                if st and (st.Name == "Physics" or st.Name == "Ragdoll"
+                    or st.Name == "FallingDown" or st.Name == "PlatformStanding") then
+                    humP:ChangeState(Enum.HumanoidStateType.GettingUp)
+                end
+                if humP.PlatformStand then humP.PlatformStand = false end
+                if (humP.WalkSpeed or 16) < 4 then humP.WalkSpeed = 16 end
+                if rootP.Anchored then rootP.Anchored = false end
+            end)
+            pcall(function()
+                for _, d in ipairs(chrP:GetDescendants()) do
+                    if d:IsA("BallSocketConstraint") or d:IsA("HingeConstraint") then
+                        d.Enabled = false
+                    end
+                end
+            end)
             local fist, equipped = nil, false
             for _, t in ipairs(chrP:GetChildren()) do
                 if t:IsA("Tool") and t:FindFirstChild("FistEvent") then
@@ -2246,7 +2265,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v2.3 (простое меню)"
+        title.Text = "PRISON ESP v2.4 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -2448,7 +2467,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.3",
+        LoadingSubtitle = "ESP + Бой v2.4",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3080,10 +3099,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v2.3 остановлен")
+    print("[PE] v2.4 остановлен")
 end
 
-print("[PE] v2.3 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.4 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
