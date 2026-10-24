@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v0.3
+--  PRISON ESP  v0.4
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1504,6 +1504,98 @@ G.PE.Probe = function(name, ...)
 end
 
 -- ============================================================
+--  ПРОБЫ В ОДИН КЛИК: урон / патроны / команда. Достаточно ЧАСТИ
+--  ника — точное имя игрока вводить не нужно.
+-- ============================================================
+local function findPlayer(namePart)
+    local part = string.lower(tostring(namePart or ""))
+    if part == "" then return nil end
+    local best, bestD
+    local myRoot = LP.Character
+        and LP.Character:FindFirstChild("HumanoidRootPart")
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            local nm = string.lower(p.Name)
+            local dn = string.lower(p.DisplayName)
+            if string.find(nm, part, 1, true) or string.find(dn, part, 1, true) then
+                local root = p.Character
+                    and p.Character:FindFirstChild("HumanoidRootPart")
+                local d = (myRoot and root)
+                    and (root.Position - myRoot.Position).Magnitude or 0
+                if not best or d < bestD then best, bestD = p, d end
+            end
+        end
+    end
+    return best
+end
+
+local function myGunRemote(remoteName)
+    for _, t in ipairs(toolList()) do
+        local gs = t:FindFirstChild("GunScript_Server")
+        if gs then
+            local r = gs:FindFirstChild(remoteName)
+            if r and r:IsA("RemoteEvent") then return r, t end
+        end
+    end
+    return nil
+end
+
+-- PE.Hit("часть ника") — выстрел урона по игроку через пушку в руках.
+-- Второй аргумент (необяз.): имя части, по умолчанию Humanoid.
+G.PE.Hit = function(namePart, partName)
+    local plr = findPlayer(namePart)
+    if not plr then
+        print("[PE HIT] игрок по '" .. tostring(namePart)
+            .. "' не найден (можно вводить часть ника)")
+        return
+    end
+    local ch = plr.Character
+    if not ch then
+        print("[PE HIT] у " .. plr.Name .. " нет персонажа")
+        return
+    end
+    local part = (partName and ch:FindFirstChild(partName))
+        or ch:FindFirstChildOfClass("Humanoid")
+    if not part then
+        print("[PE HIT] у цели нет Humanoid")
+        return
+    end
+    local remote, tool = myGunRemote("InflictTarget")
+    if not remote then
+        print("[PE HIT] нет пушки с InflictTarget в руках/рюкзаке — возьми оружие")
+        return
+    end
+    print("[PE HIT] " .. tool.Name .. ".InflictTarget -> " .. plr.Name
+        .. " (" .. part:GetFullName() .. "). СМОТРИ HP ЦЕЛИ!")
+    remote:FireServer(part)
+end
+
+-- PE.Ammo(30, 30) — проба бесконечного магазина.
+G.PE.Ammo = function(a, c)
+    a = tonumber(a) or 30
+    c = tonumber(c) or 30
+    local remote, tool = myGunRemote("ChangeAmmoAndClip")
+    if not remote then
+        print("[PE AMMO] нет пушки с ChangeAmmoAndClip — возьми оружие")
+        return
+    end
+    print("[PE AMMO] " .. tool.Name .. ".ChangeAmmoAndClip("
+        .. a .. ", " .. c .. "). СМОТРИ ПАТРОНЫ!")
+    remote:FireServer(a, c)
+end
+
+-- PE.Team("Guard") — проба смены команды.
+G.PE.Team = function(teamName)
+    local r = ReplicatedStorage:FindFirstChild("ChooseTeamEvent")
+    if not r or not r:IsA("RemoteEvent") then
+        print("[PE TEAM] ChooseTeamEvent не найден")
+        return
+    end
+    print("[PE TEAM] ChooseTeamEvent('" .. tostring(teamName) .. "'). СМОТРИ КОМАНДУ!")
+    r:FireServer(teamName)
+end
+
+-- ============================================================
 --  ПРОСТОЕ ФОЛБЭК-МЕНЮ (если Rayfield не загрузился вообще)
 -- ============================================================
 local fallbackGui = nil
@@ -1533,7 +1625,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v0.3 (простое меню)"
+        title.Text = "PRISON ESP v0.4 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1655,7 +1747,7 @@ end
 pcall(function()
     local W = Rayfield:CreateWindow({
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v0.3",
+        LoadingSubtitle = "ESP + Разведка v0.4",
         ConfigurationSaving = { Enabled = true },
     })
 
@@ -1861,6 +1953,23 @@ pcall(function()
     R:CreateButton({ Name = "Список ремоутов (в консоль)", Callback = function()
         G.PE.Remotes()
     end })
+    R:CreateSection("Пробы в один клик")
+    R:CreateParagraph({ Title = "Пробы",
+        Content = "Введи ЧАСТЬ ника врага и жми кнопки. Смотри на HP/патроны/команду цели после нажатия. Проба урона требует пушку в руках или рюкзаке." })
+    R:CreateInput({
+        Name = "Ник врага (можно часть)",
+        PlaceholderText = "например: vasya",
+        RemoveTextAfterFocusLost = false,
+        Callback = function(txt) CFG._hitName = txt end,
+    })
+    R:CreateButton({ Name = "ПРОБА: урон по игроку (InflictTarget)",
+        Callback = function() G.PE.Hit(CFG._hitName) end })
+    R:CreateButton({ Name = "ПРОБА: патроны 30/30 (ChangeAmmoAndClip)",
+        Callback = function() G.PE.Ammo(30, 30) end })
+    R:CreateButton({ Name = "ПРОБА: смена команды Guard",
+        Callback = function() G.PE.Team("Guard") end })
+    R:CreateButton({ Name = "ПРОБА: смена команды Prisoner",
+        Callback = function() G.PE.Team("Prisoner") end })
 end)
 
 -- Если Rayfield так и не загрузился — поднимаем простое меню.
@@ -1894,17 +2003,19 @@ G.PE_Stop = function()
         fallbackGui = nil
     end)
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
+    G.PE.Hit, G.PE.Ammo, G.PE.Team = nil, nil, nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v0.3 остановлен")
+    print("[PE] v0.4 остановлен")
 end
 
-print("[PE] v0.3 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v0.4 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
-    .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)")
+    .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
+    .. " / PE.Hit(\"часть ника\") / PE.Ammo() / PE.Team(\"Guard\")")
 if not DRAW_OK then
     warn("[PE] Drawing недоступен в этом исполнителе: коробки/скелет/стрелки/полоски HP/миникарта НЕ будут рисоваться. Работают только подписи над игроками и подсветка предметов.")
 end
