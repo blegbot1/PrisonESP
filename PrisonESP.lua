@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.5
+--  PRISON ESP  v2.6
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -2295,7 +2295,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v2.5 (простое меню)"
+        title.Text = "PRISON ESP v2.6 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -2493,13 +2493,16 @@ do
     end)
 end
 
+-- Дропдауны выбора цели регистрируются здесь при сборке меню,
+-- поэтому переменная объявлена ДО GUI-блока (v2.5 падала: #nil).
+local targetPickers = {}
 local guiOK = false
 local okGUI, errGUI = pcall(function()
     local W = Rayfield:CreateWindow({
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.5",
+        LoadingSubtitle = "ESP + Бой v2.6",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2750,6 +2753,7 @@ local okGUI, errGUI = pcall(function()
         if p ~= LP then opts0[#opts0 + 1] = p.Name end
     end
     table.sort(opts0)
+    if #opts0 == 0 then opts0[1] = "(игроков нет)" end
     local hitDrop = R:CreateDropdown({
         Name = "Цель (выбери игрока из списка)",
         Flag = "PE_TargetPick1",
@@ -2822,6 +2826,7 @@ local okGUI, errGUI = pcall(function()
         if p ~= LP then opts1[#opts1 + 1] = p.Name end
     end
     table.sort(opts1)
+    if #opts1 == 0 then opts1[1] = "(игроков нет)" end
     local cuffDrop = C:CreateDropdown({
         Name = "Жертва (выбери игрока из списка)",
         Flag = "PE_TargetPick2",
@@ -2905,6 +2910,11 @@ local okGUI, errGUI = pcall(function()
 end)
 if not okGUI then
     warn("[PE] СБОРКА МЕНЮ RAYFIELD УПАЛА: " .. tostring(errGUI))
+    -- Ломаное полусобранное окно убираем, чтобы не висло вместе
+    -- с простым меню (жалоба «два меню»).
+    pcall(function()
+        if Rayfield and Rayfield.Destroy then Rayfield:Destroy() end
+    end)
 end
 
 -- ПОЧИНКА КЛИКОВ RAYFIELD: на части исполнителей его интерфейс лежит
@@ -3085,7 +3095,7 @@ local function playerOpts()
     return opts
 end
 
-local targetPickers = {}   -- созданные Rayfield-дропдауны цели
+-- targetPickers объявлен выше, до GUI-блока.
 local function refreshTargetPickers()
     local opts = playerOpts()
     for _, d in ipairs(targetPickers) do
@@ -3138,10 +3148,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v2.5 остановлен")
+    print("[PE] v2.6 остановлен")
 end
 
-print("[PE] v2.5 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.6 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
