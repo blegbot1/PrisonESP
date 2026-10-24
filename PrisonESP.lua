@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.1
+--  PRISON ESP  v2.2
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -133,6 +133,8 @@ CFG.PunchDelay = tonumber(CFG.PunchDelay) or 0.25
 CFG.PunchTele  = CFG.PunchTele ~= false
 CFG.PunchTeam  = pickOpt(CFG.PunchTeam, {
     "Все", "Кроме своей команды" }, "Кроме своей команды")
+-- АНТИ-СТАН: тазер/наручники/регдолл не должны останавливать.
+CFG.AntiStun = CFG.AntiStun ~= false
 
 local STOPPED = false
 local Rayfield
@@ -1955,6 +1957,7 @@ end
 local auraAt = 0
 local punchAt = 0
 local cuffAt = 0
+local stunAt = 0
 local sprintAt = 0
 auraConn = RunService.Heartbeat:Connect(function()
     if STOPPED then return end
@@ -2081,6 +2084,65 @@ auraConn = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- АНТИ-СТАН: тазер, наручники и регдолл не держат.
+    if CFG.AntiStun and now - stunAt >= 0.12 then
+        stunAt = now
+        local chrA = LP.Character
+        local humA = chrA and chrA:FindFirstChildOfClass("Humanoid")
+        if chrA and humA then
+            -- 1) Запрет регдолл-состояний (один раз на гуманоида).
+            if not humA:GetAttribute("PE_NoRagdoll") then
+                for _, stName in ipairs({ "Ragdoll", "FallingDown", "PlatformStanding" }) do
+                    pcall(function()
+                        humA:SetStateEnabled(Enum.HumanoidStateType[stName], false)
+                    end)
+                end
+                pcall(function() humA:SetAttribute("PE_NoRagdoll", true) end)
+            end
+            -- 2) Если всё-таки завалило — поднимаемся.
+            pcall(function()
+                local st = humA:GetState()
+                if st and (st.Name == "Physics" or st.Name == "Ragdoll"
+                    or st.Name == "FallingDown" or st.Name == "PlatformStanding") then
+                    humA:ChangeState(Enum.HumanoidStateType.GettingUp)
+                end
+            end)
+            -- 3) Скорость/прыжок/стан-свойства восстанавливаем.
+            if (humA.WalkSpeed or 16) < 4 then humA.WalkSpeed = 16 end
+            if humA.PlatformStand then humA.PlatformStand = false end
+            if humA.JumpPower == 0 then humA.JumpPower = 50 end
+            -- 4) Тазер-скрипт в персонаже и регдолл-констрейнты.
+            pcall(function()
+                local gtb = chrA:FindFirstChild("GetTasedBro")
+                if gtb then gtb:Destroy() end
+                for _, d in ipairs(chrA:GetDescendants()) do
+                    if (d:IsA("BallSocketConstraint") or d:IsA("HingeConstraint"))
+                       and string.find(string.lower(d.Name), "ragdoll", 1, true) then
+                        d.Enabled = false
+                    end
+                end
+            end)
+            -- 5) Наручники: отрываем части из ActiveCuffParts от себя.
+            pcall(function()
+                local f = workspace:FindFirstChild("ActiveCuffParts")
+                if f then
+                    for _, cp in ipairs(f:GetChildren()) do
+                        if cp:IsA("BasePart") then
+                            for _, w in ipairs(cp:GetChildren()) do
+                                if w:IsA("WeldConstraint") or w:IsA("Weld") then
+                                    local other = (w.Part0 == cp) and w.Part1 or w.Part0
+                                    if other and other:IsDescendantOf(chrA) then
+                                        w:Destroy()
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+
     if not CFG.KillAura then return end
     if now - auraAt < (tonumber(CFG.KillAuraDelay) or 0.15) then return end
     auraAt = now
@@ -2154,7 +2216,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v2.1 (простое меню)"
+        title.Text = "PRISON ESP v2.2 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -2276,6 +2338,8 @@ local function buildFallbackGui()
             function(v) CFG.PunchAura = v end)
         mkToggle("Cuff-аура (наручники)", function() return CFG.CuffAura == true end,
             function(v) CFG.CuffAura = v end)
+        mkToggle("Анти-стан", function() return CFG.AntiStun ~= false end,
+            function(v) CFG.AntiStun = v end)
         mkToggle("Вечный спринт", function() return CFG.InfSprint == true end,
             function(v) CFG.InfSprint = v end)
         mkBtn("Выдать всё оружие", 22, function() G.PE.GiveAll() end)
@@ -2354,7 +2418,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.1",
+        LoadingSubtitle = "ESP + Бой v2.2",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2729,6 +2793,9 @@ local okGUI, errGUI = pcall(function()
     C:CreateToggle({ Name = "Вечный спринт", Flag = "PE_InfSprint",
         CurrentValue = CFG.InfSprint == true,
         Callback = function(v) CFG.InfSprint = v end })
+    C:CreateToggle({ Name = "Анти-стан (тазер/наручники/регдолл)", Flag = "PE_AntiStun",
+        CurrentValue = CFG.AntiStun ~= false,
+        Callback = function(v) CFG.AntiStun = v end })
 
     C:CreateSection("Гивер оружия (клик-детекторы)")
     C:CreateParagraph({ Title = "Гивер",
@@ -2980,10 +3047,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v2.1 остановлен")
+    print("[PE] v2.2 остановлен")
 end
 
-print("[PE] v2.1 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.2 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
