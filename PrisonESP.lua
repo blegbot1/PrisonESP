@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v0.5
+--  PRISON ESP  v0.6
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1630,7 +1630,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v0.5 (простое меню)"
+        title.Text = "PRISON ESP v0.6 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1773,10 +1773,28 @@ for _, u in ipairs(RF_URLS) do
 end
 end -- PE_SIMPLE check
 
+-- Снапшот UI-контейнера ДО создания окна Rayfield: после создания
+-- перенесём его интерфейс в PlayerGui (см. rescueRayfield ниже).
+local rfContainer
+local rfBefore = {}
+do
+    local function getCont()
+        if typeof(gethui) == "function" then
+            local ok, h = pcall(gethui)
+            if ok and h and h.Parent then return h end
+        end
+        return CoreGui
+    end
+    rfContainer = getCont()
+    pcall(function()
+        for _, c in ipairs(rfContainer:GetChildren()) do rfBefore[c] = true end
+    end)
+end
+
 pcall(function()
     local W = Rayfield:CreateWindow({
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v0.5",
+        LoadingSubtitle = "ESP + Разведка v0.6",
         ConfigurationSaving = { Enabled = true },
     })
 
@@ -2001,6 +2019,31 @@ pcall(function()
         Callback = function() G.PE.Team("Prisoner") end })
 end)
 
+-- ПОЧИНКА КЛИКОВ RAYFIELD: на части исполнителей его интерфейс лежит
+-- в контейнере (gethui/CoreGui), который рисуется, но НЕ принимает
+-- ввод. Переносим интерфейс в PlayerGui — там клики работают всегда.
+local function rescueRayfield()
+    if not Rayfield or not rfContainer then return end
+    local pg = LP:FindFirstChildOfClass("PlayerGui")
+    if not pg then return end
+    local moved = false
+    pcall(function()
+        for _, c in ipairs(rfContainer:GetChildren()) do
+            if not rfBefore[c] and c:IsA("ScreenGui") then
+                c.ResetOnSpawn = false
+                c.DisplayOrder = 100000
+                c.Parent = pg
+                moved = true
+            end
+        end
+    end)
+    if moved then
+        print("[PE] интерфейс Rayfield перенесён в PlayerGui — клики должны работать")
+    end
+end
+task.delay(0.5, rescueRayfield)
+task.delay(2, rescueRayfield)
+
 -- Если Rayfield так и не загрузился — поднимаем простое меню.
 if not Rayfield then
     buildFallbackGui()
@@ -2038,10 +2081,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v0.5 остановлен")
+    print("[PE] v0.6 остановлен")
 end
 
-print("[PE] v0.5 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v0.6 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
     .. " / PE.Hit(\"часть ника\") / PE.Ammo() / PE.Team(\"Guard\")")
