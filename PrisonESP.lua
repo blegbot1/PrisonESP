@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v1.8
+--  PRISON ESP  v1.9
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1816,6 +1816,60 @@ G.PE.Cuff = function(namePart)
     print("[PE CUFF] CuffEvent -> " .. plr.Name .. " (4 варианта аргументов)")
 end
 
+-- Безопасная проба админ-панели: пустая строка и ":help". Если сервер
+-- отвечает/выполняет — панель не проверяет админа (дыра в игре).
+G.PE.AdminProbe = function()
+    local r = ReplicatedStorage:FindFirstChild("AdminCommandBarEvent")
+    if not r or not r:IsA("RemoteEvent") then
+        print("[PE ADMIN] AdminCommandBarEvent не найден")
+        return
+    end
+    local listen
+    listen = r.OnClientEvent:Connect(function(...)
+        local a = table.pack(...)
+        local ps = {}
+        for i = 1, math.min(a.n, 5) do
+            ps[#ps + 1] = tostring(a[i])
+        end
+        print("[PE ADMIN] <- ответ сервера: " .. table.concat(ps, " | "))
+    end)
+    print("[PE ADMIN] проба 1: пустая строка")
+    pcall(function() r:FireServer("") end)
+    task.wait(1)
+    print("[PE ADMIN] проба 2: ':help'")
+    pcall(function() r:FireServer(":help") end)
+    task.delay(4, function()
+        pcall(function() listen:Disconnect() end)
+        print("[PE ADMIN] проба завершена. Ответов не было = сервер игнорирует не-админов.")
+    end)
+end
+
+-- Список банов (чтение, RemoteFunction).
+G.PE.BanList = function()
+    local f = ReplicatedStorage:FindFirstChild("GetBannedPlayers")
+    if not f or not f:IsA("RemoteFunction") then
+        print("[PE BANLIST] GetBannedPlayers не найден")
+        return
+    end
+    local ok, res = pcall(function() return f:InvokeServer() end)
+    if not ok then
+        print("[PE BANLIST] ошибка: " .. tostring(res))
+        return
+    end
+    if type(res) == "table" then
+        local n = 0
+        for k, v in pairs(res) do
+            n = n + 1
+            if n <= 30 then
+                print("[PE BANLIST] " .. tostring(k) .. " = " .. tostring(v))
+            end
+        end
+        print("[PE BANLIST] всего записей: " .. n)
+    else
+        print("[PE BANLIST] ответ: " .. tostring(res))
+    end
+end
+
 -- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
 -- с какими аргументами игра честно стреляет InflictTarget.
 G.PE.GunSource = function()
@@ -2084,7 +2138,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v1.8 (простое меню)"
+        title.Text = "PRISON ESP v1.9 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -2267,7 +2321,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v1.8",
+        LoadingSubtitle = "ESP + Бой v1.9",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2527,6 +2581,13 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.Team("Guard") end })
     R:CreateButton({ Name = "ПРОБА: смена команды Prisoner",
         Callback = function() G.PE.Team("Prisoner") end })
+    R:CreateSection("Админ-панель и баны (безопасные пробы)")
+    R:CreateParagraph({ Title = "Админ-пробы",
+        Content = "«Проверка админ-панели» шлёт в AdminCommandBarEvent пустую строку и :help (безвредно) и слушает ответ. «Список банов» читает GetBannedPlayers. Банить чужих игроков функций здесь нет и не будет." })
+    R:CreateButton({ Name = "Проверка админ-панели (безопасная)",
+        Callback = function() G.PE.AdminProbe() end })
+    R:CreateButton({ Name = "Список банов (GetBannedPlayers)",
+        Callback = function() G.PE.BanList() end })
 
     -- ====================== ВКЛАДКА БОЙ ======================
     local C = safeNewTab(W, "Бой", "swords", "Бой")
@@ -2828,15 +2889,16 @@ G.PE_Stop = function()
     G.PE.Hit, G.PE.Ammo, G.PE.Team, G.PE.Diag = nil, nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff = nil, nil, nil
+    G.PE.AdminProbe, G.PE.BanList = nil, nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v1.8 остановлен")
+    print("[PE] v1.9 остановлен")
 end
 
-print("[PE] v1.8 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v1.9 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
