@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v0.7
+--  PRISON ESP  v0.8
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1630,7 +1630,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v0.7 (простое меню)"
+        title.Text = "PRISON ESP v0.8 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1797,7 +1797,7 @@ end
 pcall(function()
     local W = Rayfield:CreateWindow({
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v0.7",
+        LoadingSubtitle = "ESP + Разведка v0.8",
         ConfigurationSaving = { Enabled = true },
     })
 
@@ -2026,27 +2026,55 @@ end)
 -- в контейнере (gethui/CoreGui), который рисуется, но НЕ принимает
 -- ввод. Переносим интерфейс в PlayerGui — там клики работают всегда.
 local function rescueRayfield()
-    if not Rayfield or not rfContainer then return end
+    if not Rayfield then return end
     local pg = LP:FindFirstChildOfClass("PlayerGui")
     if not pg then return end
-    local moved = false
-    pcall(function()
-        for _, c in ipairs(rfContainer:GetChildren()) do
-            if not rfBefore[c] and c:IsA("ScreenGui") then
-                c.ResetOnSpawn = false
-                c.DisplayOrder = 100000
-                c.Parent = pg
-                rfMovedN = rfMovedN + 1
-                moved = true
-            end
+    local function tryMove(sg)
+        if not (sg and sg:IsA("ScreenGui")) then return false end
+        if sg.Parent == pg then return false end
+        local okM, errM = pcall(function()
+            sg.ResetOnSpawn = false
+            sg.DisplayOrder = 100000
+            sg.IgnoreGuiInset = true
+            sg.Parent = pg
+        end)
+        if okM then
+            rfMovedN = rfMovedN + 1
+            print("[PE] Rayfield ScreenGui '" .. sg.Name
+                .. "' ПЕРЕНЕСЁН в PlayerGui — клики должны заработать")
+            return true
         end
-    end)
-    if moved then
-        print("[PE] интерфейс Rayfield перенесён в PlayerGui — клики должны работать")
+        warn("[PE] перенос '" .. sg.Name .. "' не удался: " .. tostring(errM))
+        return false
+    end
+    -- 1) Точное имя: Rayfield создаёт ScreenGui с именем "Rayfield"
+    --    (DIAG показал: он лежит в gethui-контейнере).
+    for _, cont in ipairs({ rfContainer, CoreGui }) do
+        if cont and cont ~= pg then
+            pcall(function()
+                for _, c in ipairs(cont:GetChildren()) do
+                    if c:IsA("ScreenGui") and c.Name == "Rayfield" then
+                        tryMove(c)
+                    end
+                end
+            end)
+        end
+    end
+    -- 2) Запасной вариант: любые НОВЫЕ ScreenGui в контейнере
+    --    (если имя в другой версии библиотеки другое).
+    if rfMovedN == 0 and rfContainer and rfContainer ~= pg then
+        pcall(function()
+            for _, c in ipairs(rfContainer:GetChildren()) do
+                if not rfBefore[c] and c:IsA("ScreenGui") then
+                    tryMove(c)
+                end
+            end
+        end)
     end
 end
-task.delay(0.5, rescueRayfield)
-task.delay(2, rescueRayfield)
+task.delay(0.2, rescueRayfield)
+task.delay(1, rescueRayfield)
+task.delay(2.5, rescueRayfield)
 
 -- ============================================================
 --  ДИАГНОСТИКА: PE.Diag() + логгер каждого клика.
@@ -2193,10 +2221,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v0.7 остановлен")
+    print("[PE] v0.8 остановлен")
 end
 
-print("[PE] v0.7 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v0.8 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
