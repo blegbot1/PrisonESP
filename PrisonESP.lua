@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.9
+--  PRISON ESP  v2.10
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1765,6 +1765,29 @@ G.PE.ResetMenu = function()
     r:FireServer()
 end
 
+-- Ищем тул с нужным ремоутом/дочерним объектом: сначала экипированный.
+-- ВАЖНО: объявлен ДО G.PE.Cuff — иначе имя резолвится в глобал nil
+-- и кнопка наручников падает с "attempt to call a nil value".
+local function findToolWith(childName)
+    local chr = LP.Character
+    if chr then
+        for _, t in ipairs(chr:GetChildren()) do
+            if t:IsA("Tool") and t:FindFirstChild(childName) then
+                return t, true
+            end
+        end
+    end
+    local bp = LP:FindFirstChild("Backpack")
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t:FindFirstChild(childName) then
+                return t, false
+            end
+        end
+    end
+    return nil, false
+end
+
 -- Телепорт за спину игрока (как «тот чел»: появился рядом — и сразу
 -- наручники/удар). Клиентский телепорт игра не проверяет.
 G.PE.TP = function(namePart)
@@ -1883,27 +1906,6 @@ local function targetAllowed(p, mode, myTeam)
         return (roleOf(p) == "guard")
     end
     return true
-end
-
--- Ищем тул с нужным ремоутом/дочерним объектом: сначала экипированный.
-local function findToolWith(childName)
-    local chr = LP.Character
-    if chr then
-        for _, t in ipairs(chr:GetChildren()) do
-            if t:IsA("Tool") and t:FindFirstChild(childName) then
-                return t, true
-            end
-        end
-    end
-    local bp = LP:FindFirstChild("Backpack")
-    if bp then
-        for _, t in ipairs(bp:GetChildren()) do
-            if t:IsA("Tool") and t:FindFirstChild(childName) then
-                return t, false
-            end
-        end
-    end
-    return nil, false
 end
 
 -- Цикл: cuff-аура, punch-аура, килл-аура, вечный спринт.
@@ -2250,7 +2252,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.9",
+        LoadingSubtitle = "ESP + Бой v2.10",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2878,10 +2880,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v2.9 остановлен")
+    print("[PE] v2.10 остановлен")
 end
 
-print("[PE] v2.9 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.10 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
