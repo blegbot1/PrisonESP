@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.7
+--  PRISON ESP  v2.8
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -118,8 +118,9 @@ CFG.KillAura       = CFG.KillAura == true
 CFG.KillAuraRadius = tonumber(CFG.KillAuraRadius) or 40
 CFG.KillAuraDelay  = tonumber(CFG.KillAuraDelay) or 0.15
 CFG.KillAuraTeam   = pickOpt(CFG.KillAuraTeam, {
-    "Все", "Кроме своей команды", "Только охрана" }, "Все")
-CFG.InfSprint      = CFG.InfSprint == true
+    "Все", "Кроме своей команды", "Только своя команда",
+    "Враги (охрана↔зеки)", "Только охрана", "Только заключённые",
+    "Выбранный игрок" }, "Все")
 -- НАРУЧНИКИ: CuffEvent сковывает игрока. Handcuffs выдаются за
 -- GUARD (команда переключается мгновенно кнопкой).
 CFG.CuffAura = CFG.CuffAura == true
@@ -142,7 +143,6 @@ CFG.AntiStun = CFG.AntiStun ~= false
 -- из декомпиляции GunScript_Local: (Humanoid, RootPart, урон,
 -- направление, отдача, вампиризм, поджог).
 CFG.KillAuraDamage = tonumber(CFG.KillAuraDamage) or 50
-CFG.InfAmmo = CFG.InfAmmo == true
 
 local STOPPED = false
 local Rayfield
@@ -1659,20 +1659,6 @@ G.PE.Hit = function(namePart, partName)
         Vector3.new(0, 0, 1), 0, false, false)
 end
 
--- PE.Ammo(30, 30) — проба бесконечного магазина.
-G.PE.Ammo = function(a, c)
-    a = tonumber(a) or 30
-    c = tonumber(c) or 999999
-    local remote, tool = myGunRemote("ChangeAmmoAndClip")
-    if not remote then
-        print("[PE AMMO] нет пушки с ChangeAmmoAndClip — возьми оружие")
-        return
-    end
-    print("[PE AMMO] " .. tool.Name .. ".ChangeAmmoAndClip("
-        .. a .. ", " .. c .. "). СМОТРИ ПАТРОНЫ!")
-    remote:FireServer(a, c)
-end
-
 -- PE.Team("Guard") — проба смены команды.
 G.PE.Team = function(teamName)
     local r = ReplicatedStorage:FindFirstChild("ChooseTeamEvent")
@@ -1842,60 +1828,6 @@ G.PE.Cuff = function(namePart)
     print("[PE CUFF] CuffEvent -> " .. plr.Name .. " (4 варианта аргументов)")
 end
 
--- Безопасная проба админ-панели: пустая строка и ":help". Если сервер
--- отвечает/выполняет — панель не проверяет админа (дыра в игре).
-G.PE.AdminProbe = function()
-    local r = ReplicatedStorage:FindFirstChild("AdminCommandBarEvent")
-    if not r or not r:IsA("RemoteEvent") then
-        print("[PE ADMIN] AdminCommandBarEvent не найден")
-        return
-    end
-    local listen
-    listen = r.OnClientEvent:Connect(function(...)
-        local a = table.pack(...)
-        local ps = {}
-        for i = 1, math.min(a.n, 5) do
-            ps[#ps + 1] = tostring(a[i])
-        end
-        print("[PE ADMIN] <- ответ сервера: " .. table.concat(ps, " | "))
-    end)
-    print("[PE ADMIN] проба 1: пустая строка")
-    pcall(function() r:FireServer("") end)
-    task.wait(1)
-    print("[PE ADMIN] проба 2: ':help'")
-    pcall(function() r:FireServer(":help") end)
-    task.delay(4, function()
-        pcall(function() listen:Disconnect() end)
-        print("[PE ADMIN] проба завершена. Ответов не было = сервер игнорирует не-админов.")
-    end)
-end
-
--- Список банов (чтение, RemoteFunction).
-G.PE.BanList = function()
-    local f = ReplicatedStorage:FindFirstChild("GetBannedPlayers")
-    if not f or not f:IsA("RemoteFunction") then
-        print("[PE BANLIST] GetBannedPlayers не найден")
-        return
-    end
-    local ok, res = pcall(function() return f:InvokeServer() end)
-    if not ok then
-        print("[PE BANLIST] ошибка: " .. tostring(res))
-        return
-    end
-    if type(res) == "table" then
-        local n = 0
-        for k, v in pairs(res) do
-            n = n + 1
-            if n <= 30 then
-                print("[PE BANLIST] " .. tostring(k) .. " = " .. tostring(v))
-            end
-        end
-        print("[PE BANLIST] всего записей: " .. n)
-    else
-        print("[PE BANLIST] ответ: " .. tostring(res))
-    end
-end
-
 -- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
 -- с какими аргументами игра честно стреляет InflictTarget.
 G.PE.GunSource = function()
@@ -1936,7 +1868,18 @@ end
 local function targetAllowed(p, mode, myTeam)
     if mode == "Кроме своей команды" then
         return not (myTeam and p.Team == myTeam)
+    elseif mode == "Только своя команда" then
+        return myTeam ~= nil and p.Team == myTeam
     elseif mode == "Только охрана" then
+        return (roleOf(p) == "guard")
+    elseif mode == "Только заключённые" then
+        return (roleOf(p) == "prisoner")
+    elseif mode == "Враги (охрана↔зеки)" then
+        -- За охрану бьём не-охрану, не за охрану — бьём охрану.
+        local myRole = roleOf(LP)
+        if myRole == "guard" then
+            return roleOf(p) ~= "guard"
+        end
         return (roleOf(p) == "guard")
     end
     return true
@@ -1968,44 +1911,9 @@ local auraAt = 0
 local punchAt = 0
 local cuffAt = 0
 local stunAt = 0
-local ammoAt = 0
-local sprintAt = 0
 auraConn = RunService.Heartbeat:Connect(function()
     if STOPPED then return end
     local now = os.clock()
-    -- БЕСКОНЕЧНЫЕ ПАТРОНЫ: сам клиент при перезарядке сообщает серверу
-    -- магазин и запас через ChangeAmmoAndClip — делаем это сами.
-    if CFG.InfAmmo and now - ammoAt > 1 then
-        ammoAt = now
-        local chrI = LP.Character
-        local toolI = chrI and chrI:FindFirstChildOfClass("Tool")
-        if toolI then
-            local gsI = toolI:FindFirstChild("GunScript_Server")
-            local rI = gsI and gsI:FindFirstChild("ChangeAmmoAndClip")
-            if rI then
-                local clip = 30
-                local okS, m = pcall(function()
-                    return require(toolI:FindFirstChild("Setting"))
-                end)
-                if okS and type(m) == "table" and tonumber(m.AmmoPerClip) then
-                    clip = tonumber(m.AmmoPerClip)
-                end
-                pcall(function() rI:FireServer(clip, 999999) end)
-            end
-        end
-    end
-
-    -- Вечный спринт: раз в 8 с напоминаем серверу, что мы бежим.
-    if CFG.InfSprint then
-        local okS, rS = pcall(function()
-            local f = ReplicatedStorage:FindFirstChild("SprintRemotes")
-            return f and f:FindFirstChild("SprintRemote")
-        end)
-        if okS and rS and now - sprintAt > 8 then
-            sprintAt = now
-            pcall(function() rS:FireServer(true) end)
-        end
-    end
 
     -- CUFF-АУРА: сковывает наручниками ближайшего врага (Handcuffs
     -- должны быть в руках/рюкзаке — выдаются за GUARD).
@@ -2239,9 +2147,16 @@ auraConn = RunService.Heartbeat:Connect(function()
             local ch = p.Character
             local hum = ch and ch:FindFirstChildOfClass("Humanoid")
             local root = ch and ch:FindFirstChild("HumanoidRootPart")
-            if ch and hum and hum.Health > 0 and root
-               and (root.Position - myRoot.Position).Magnitude <= radius then
-                local ok = targetAllowed(p, mode, myTeam)
+            if ch and hum and hum.Health > 0 and root then
+                -- «Выбранный игрок»: бьём только цель из списка,
+                -- без ограничения дистанции.
+                local isSel = (mode == "Выбранный игрок"
+                    and p.Name == CFG._target)
+                local inRange = (root.Position - myRoot.Position).Magnitude
+                    <= radius
+                local ok = isSel
+                    or (mode ~= "Выбранный игрок" and inRange
+                        and targetAllowed(p, mode, myTeam))
                 if ok then
                     hits = hits + 1
                     -- ТОЧНАЯ подписура из декомпиляции GunScript_Local:
@@ -2328,7 +2243,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.7",
+        LoadingSubtitle = "ESP + Бой v2.8",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2595,19 +2510,10 @@ local okGUI, errGUI = pcall(function()
     targetPickers[#targetPickers + 1] = hitDrop
     R:CreateButton({ Name = "ПРОБА: урон по игроку (InflictTarget)",
         Callback = function() G.PE.Hit(CFG._target) end })
-    R:CreateButton({ Name = "ПРОБА: патроны 30/30 (ChangeAmmoAndClip)",
-        Callback = function() G.PE.Ammo(30, 30) end })
     R:CreateButton({ Name = "ПРОБА: смена команды Guard",
         Callback = function() G.PE.Team("Guard") end })
     R:CreateButton({ Name = "ПРОБА: смена команды Prisoner",
         Callback = function() G.PE.Team("Prisoner") end })
-    R:CreateSection("Админ-панель и баны (безопасные пробы)")
-    R:CreateParagraph({ Title = "Админ-пробы",
-        Content = "«Проверка админ-панели» шлёт в AdminCommandBarEvent пустую строку и :help (безвредно) и слушает ответ. «Список банов» читает GetBannedPlayers. Банить чужих игроков функций здесь нет и не будет." })
-    R:CreateButton({ Name = "Проверка админ-панели (безопасная)",
-        Callback = function() G.PE.AdminProbe() end })
-    R:CreateButton({ Name = "Список банов (GetBannedPlayers)",
-        Callback = function() G.PE.BanList() end })
 
     -- ====================== ВКЛАДКА БОЙ ======================
     local C = safeNewTab(W, "Бой", "swords", "Бой")
@@ -2634,7 +2540,9 @@ local okGUI, errGUI = pcall(function()
     C:CreateDropdown({
         Name = "Кого бить",
         Flag = "PE_KillAuraTeamPick",
-        Options = { "Все", "Кроме своей команды", "Только охрана" },
+        Options = { "Все", "Кроме своей команды", "Только своя команда",
+            "Враги (охрана↔зеки)", "Только охрана", "Только заключённые",
+            "Выбранный игрок" },
         CurrentOption = { CFG.KillAuraTeam },
         MultipleOptions = false,
         Callback = function(selected)
@@ -2709,15 +2617,9 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.ResetMenu() end })
 
     C:CreateSection("Движение")
-    C:CreateToggle({ Name = "Вечный спринт", Flag = "PE_InfSprint",
-        CurrentValue = CFG.InfSprint == true,
-        Callback = function(v) CFG.InfSprint = v end })
     C:CreateToggle({ Name = "Анти-стан (тазер/наручники/регдолл)", Flag = "PE_AntiStun",
         CurrentValue = CFG.AntiStun ~= false,
         Callback = function(v) CFG.AntiStun = v end })
-    C:CreateToggle({ Name = "Бесконечные патроны", Flag = "PE_InfAmmo",
-        CurrentValue = CFG.InfAmmo == true,
-        Callback = function(v) CFG.InfAmmo = v end })
 
     C:CreateSection("Гивер оружия (клик-детекторы)")
     C:CreateParagraph({ Title = "Гивер",
@@ -2923,7 +2825,9 @@ end
 local function refreshTargetPickers()
     local opts = playerOpts()
     for _, d in ipairs(targetPickers) do
-        pcall(function() d:Set(opts) end)
+        -- Внимание: в Rayfield обновление списка — :Refresh (а :Set
+        -- выбирает опцию). Раньше звали :Set — список не обновлялся.
+        pcall(function() d:Refresh(opts) end)
     end
 end
 
@@ -2959,23 +2863,22 @@ G.PE_Stop = function()
     pcall(function() clickConn:Disconnect() end)
     pcall(function() auraConn:Disconnect() end)
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
-    G.PE.Hit, G.PE.Ammo, G.PE.Team, G.PE.Diag = nil, nil, nil, nil
+    G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff = nil, nil, nil
-    G.PE.AdminProbe, G.PE.BanList = nil, nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v2.7 остановлен")
+    print("[PE] v2.8 остановлен")
 end
 
-print("[PE] v2.7 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.8 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
-    .. " / PE.Hit(\"часть ника\") / PE.Ammo() / PE.Team(\"Guard\") / PE.Diag()")
+    .. " / PE.Hit(\"часть ника\") / PE.Team(\"Guard\") / PE.Diag()")
 if not DRAW_OK then
     warn("[PE] Drawing недоступен в этом исполнителе: коробки/скелет/стрелки/полоски HP/миникарта НЕ будут рисоваться. Работают только подписи над игроками и подсветка предметов.")
 end
