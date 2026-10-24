@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v0.9
+--  PRISON ESP  v1.0
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1630,7 +1630,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v0.9 (простое меню)"
+        title.Text = "PRISON ESP v1.0 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1797,17 +1797,50 @@ do
     end)
 end
 
-pcall(function()
+local guiOK = false
+local okGUI, errGUI = pcall(function()
     local W = Rayfield:CreateWindow({
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v0.9",
+        LoadingSubtitle = "ESP + Разведка v1.0",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
         ConfigurationSaving = { Enabled = false },
     })
 
-    local T = W:CreateTab("ESP", "box")
+    -- Каждый элемент в своём pcall: на части исполнителей один
+    -- неудачный Create* ронял ВСЮ сборку меню — окно оставалось
+    -- видимым, но в нём торчали мёртвые прототипы шаблона
+    -- (Toggle/Slider/Button без подключённых обработчиков).
+    local function safeTab(tabObj, tabName)
+        local proxy = {}
+        setmetatable(proxy, {
+            __index = function(_, k)
+                local v = tabObj[k]
+                if type(v) ~= "function" then return v end
+                return function(_, ...)
+                    local ok, res = pcall(v, tabObj, ...)
+                    if not ok then
+                        warn("[PE GUI] " .. tabName .. "." .. tostring(k)
+                            .. ": " .. tostring(res))
+                    end
+                    return res
+                end
+            end,
+        })
+        return proxy
+    end
+    local function safeNewTab(Win, name, icon, label)
+        local okT, T0 = pcall(function() return Win:CreateTab(name, icon) end)
+        if not okT or not T0 then
+            warn("[PE GUI] CreateTab(" .. label .. "): " .. tostring(T0))
+            return nil
+        end
+        return safeTab(T0, label)
+    end
+
+    local T = safeNewTab(W, "ESP", "box", "ESP")
+    if not T then error("вкладка ESP не создалась") end
 
     T:CreateSection("Роли")
     T:CreateParagraph({ Title = "Роли",
@@ -1991,7 +2024,8 @@ pcall(function()
         CurrentValue = CFG.MinimapSelf ~= false,
         Callback = function(v) CFG.MinimapSelf = v end })
 
-    local M = W:CreateTab("Мир", "magnet")
+    local M = safeNewTab(W, "Мир", "magnet", "Мир")
+    if not M then error("вкладка Мир не создалась") end
     M:CreateSection("Предметы на земле")
     M:CreateParagraph({ Title = "Предметы",
         Content = "Подсветка пушек, кейкарты, ящиков с патронами и молотка на земле (через стены)." })
@@ -1999,7 +2033,8 @@ pcall(function()
         CurrentValue = CFG.Items ~= false,
         Callback = function(v) CFG.Items = v end })
 
-    local R = W:CreateTab("Разведка", "search")
+    local R = safeNewTab(W, "Разведка", "search", "Разведка")
+    if not R then error("вкладка Разведка не создалась") end
     R:CreateSection("Разведка")
     R:CreateParagraph({ Title = "Как проверять дыры",
         Content = "1) PE.Remotes() в консоль — все ремоуты. 2) PE.Guns() — ТТХ пушек. 3) PE.Probe(\"InflictTarget\", workspace[\"НИК\"].Humanoid) — урон по чужой части. PE.Probe(\"ChangeAmmoAndClip\", 30, 30) — патроны. PE.Probe(\"ChooseTeamEvent\", \"Guard\") — смена команды. PE.TeamOf(игрок) — как скрипт видит роль." })
@@ -2026,7 +2061,11 @@ pcall(function()
         Callback = function() G.PE.Team("Guard") end })
     R:CreateButton({ Name = "ПРОБА: смена команды Prisoner",
         Callback = function() G.PE.Team("Prisoner") end })
+    guiOK = true
 end)
+if not okGUI then
+    warn("[PE] СБОРКА МЕНЮ RAYFIELD УПАЛА: " .. tostring(errGUI))
+end
 
 -- ПОЧИНКА КЛИКОВ RAYFIELD: на части исполнителей его интерфейс лежит
 -- в контейнере (gethui/CoreGui), который рисуется, но НЕ принимает
@@ -2221,8 +2260,8 @@ pcall(function()
     end)
 end)
 
--- Если Rayfield так и не загрузился — поднимаем простое меню.
-if not Rayfield then
+-- Если Rayfield не загрузился ИЛИ сборка меню упала — простое меню.
+if not Rayfield or not guiOK then
     buildFallbackGui()
 end
 
@@ -2263,10 +2302,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v0.9 остановлен")
+    print("[PE] v1.0 остановлен")
 end
 
-print("[PE] v0.9 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v1.0 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
