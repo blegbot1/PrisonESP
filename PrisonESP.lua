@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v0.4
+--  PRISON ESP  v0.5
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1605,9 +1605,14 @@ local function buildFallbackGui()
         pg.Name = "PE_Fallback"
         pg.ResetOnSpawn = false
         pg.DisplayOrder = 999
-        local parentOk = pcall(function() pg.Parent = CoreGui end)
-        if not parentOk then
+        -- Интерактивное меню: PlayerGui надёжнее принимает клики —
+        -- CoreGui на части исполнителей рисует, но НЕ нажимается.
+        local pgOk = pcall(function()
             pg.Parent = LP:FindFirstChildOfClass("PlayerGui")
+                or LP:WaitForChild("PlayerGui", 3)
+        end)
+        if not pgOk or not pg.Parent then
+            pcall(function() pg.Parent = CoreGui end)
         end
 
         local frame = Instance.new("Frame")
@@ -1625,7 +1630,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v0.4 (простое меню)"
+        title.Text = "PRISON ESP v0.5 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1639,6 +1644,20 @@ local function buildFallbackGui()
         pad.Parent = frame
 
         local order = 0
+        -- Клик + тап с защитой от двойного срабатывания: на части
+        -- исполнителей MouseButton1Click один и не стреляет на тач.
+        local function bindClick(b, onClick)
+            local busy = false
+            local function fire()
+                if busy then return end
+                busy = true
+                local okE, errE = pcall(onClick)
+                if not okE then warn("[PE] кнопка: " .. tostring(errE)) end
+                task.delay(0.15, function() busy = false end)
+            end
+            b.MouseButton1Click:Connect(fire)
+            pcall(function() b.TouchTap:Connect(fire) end)
+        end
         local function mkBtn(text, h, onClick)
             order = order + 1
             local b = Instance.new("TextButton")
@@ -1650,8 +1669,10 @@ local function buildFallbackGui()
             b.Font = Enum.Font.Gotham
             b.TextSize = 12
             b.Text = text
+            b.Active = true
+            b.AutoButtonColor = true
             b.Parent = frame
-            b.MouseButton1Click:Connect(onClick)
+            bindClick(b, onClick)
             return b
         end
         local function mkToggle(name, get, set)
@@ -1727,6 +1748,13 @@ local RF_URLS = {
     "https://sirius.menu/rayfield",
     "https://raw.githubusercontent.com/shlexware/Rayfield/main/source",
 }
+-- Аварийный флаг: getgenv().PE_SIMPLE = true ДО запуска скрипта —
+-- Rayfield пропускается сразу, включается простое меню (если сам
+-- Rayfield грузится, но кнопки в нём мёртвые).
+if G.PE_SIMPLE == true then
+    warn("[PE] PE_SIMPLE=true — Rayfield пропущен, будет простое меню")
+end
+if G.PE_SIMPLE ~= true then
 for _, u in ipairs(RF_URLS) do
     local ok, res = pcall(function()
         local src = game:HttpGet(u, true)
@@ -1743,11 +1771,12 @@ for _, u in ipairs(RF_URLS) do
     end
     warn("[PE] Rayfield не загрузился (" .. u .. "): " .. tostring(res))
 end
+end -- PE_SIMPLE check
 
 pcall(function()
     local W = Rayfield:CreateWindow({
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v0.4",
+        LoadingSubtitle = "ESP + Разведка v0.5",
         ConfigurationSaving = { Enabled = true },
     })
 
@@ -2009,10 +2038,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v0.4 остановлен")
+    print("[PE] v0.5 остановлен")
 end
 
-print("[PE] v0.4 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v0.5 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
     .. " / PE.Hit(\"часть ника\") / PE.Ammo() / PE.Team(\"Guard\")")
