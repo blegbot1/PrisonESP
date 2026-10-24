@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v1.2
+--  PRISON ESP  v1.3
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -811,9 +811,20 @@ function VIS.update(cam, myRoot)
                 else
                     feet = mvRoot.Position - Vector3.new(0, 3, 0)
                 end
+                -- v1.3: Enum.FloorMaterial отсутствует в песочнице части
+                -- исполнителей ("FloorMaterial is not a valid member of
+                -- Enum") — эта строка роняла ВЕСЬ кадр VIS: часть игроков
+                -- успевала отрисоваться, часть нет, стрелки не доходили,
+                -- скелеты залипали. Сравниваем по имени без Enum.X.
                 local mHum = ch:FindFirstChildOfClass("Humanoid")
-                local grounded = mHum
-                    and mHum.FloorMaterial ~= Enum.FloorMaterial.Air
+                local grounded = false
+                if mHum then
+                    local okFM, fm = pcall(function()
+                        return mHum.FloorMaterial
+                    end)
+                    grounded = okFM and typeof(fm) == "EnumItem"
+                        and fm.Name ~= "Air"
+                end
                 spRing = vProj(cam, feet)
                 if spRing and spRing.Z > 0 and spRing.Z < 180 and grounded then
                     spRing2 = vProj(cam, feet + cam.CFrame.RightVector * 1.6)
@@ -1658,7 +1669,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v1.2 (простое меню)"
+        title.Text = "PRISON ESP v1.3 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1831,7 +1842,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v1.2",
+        LoadingSubtitle = "ESP + Разведка v1.3",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2332,10 +2343,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v1.2 остановлен")
+    print("[PE] v1.3 остановлен")
 end
 
-print("[PE] v1.2 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v1.3 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
