@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v0.2
+--  PRISON ESP  v0.3
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1504,14 +1504,158 @@ G.PE.Probe = function(name, ...)
 end
 
 -- ============================================================
+--  ПРОСТОЕ ФОЛБЭК-МЕНЮ (если Rayfield не загрузился вообще)
+-- ============================================================
+local fallbackGui = nil
+local function buildFallbackGui()
+    local ok, err = pcall(function()
+        local pg = Instance.new("ScreenGui")
+        pg.Name = "PE_Fallback"
+        pg.ResetOnSpawn = false
+        pg.DisplayOrder = 999
+        local parentOk = pcall(function() pg.Parent = CoreGui end)
+        if not parentOk then
+            pg.Parent = LP:FindFirstChildOfClass("PlayerGui")
+        end
+
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(0, 240, 0, 470)
+        frame.Position = UDim2.new(0, 14, 0.5, -235)
+        frame.BackgroundColor3 = Color3.fromRGB(24, 24, 32)
+        frame.BorderColor3 = Color3.fromRGB(70, 170, 255)
+        frame.BorderSizePixel = 2
+        pcall(function() frame.Active = true; frame.Draggable = true end)
+        frame.Parent = pg
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, 0, 0, 26)
+        title.BackgroundColor3 = Color3.fromRGB(70, 170, 255)
+        title.TextColor3 = Color3.new(1, 1, 1)
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 13
+        title.Text = "PRISON ESP v0.3 (простое меню)"
+        title.Parent = frame
+
+        local list = Instance.new("UIListLayout")
+        list.Padding = UDim.new(0, 3)
+        list.SortOrder = Enum.SortOrder.LayoutOrder
+        list.Parent = frame
+        local pad = Instance.new("UIPadding")
+        pad.PaddingTop = UDim.new(0, 30)
+        pad.PaddingLeft = UDim.new(0, 5)
+        pad.PaddingRight = UDim.new(0, 5)
+        pad.Parent = frame
+
+        local order = 0
+        local function mkBtn(text, h, onClick)
+            order = order + 1
+            local b = Instance.new("TextButton")
+            b.LayoutOrder = order
+            b.Size = UDim2.new(1, 0, 0, h or 22)
+            b.BackgroundColor3 = Color3.fromRGB(38, 38, 48)
+            b.BorderColor3 = Color3.fromRGB(60, 60, 74)
+            b.TextColor3 = Color3.new(1, 1, 1)
+            b.Font = Enum.Font.Gotham
+            b.TextSize = 12
+            b.Text = text
+            b.Parent = frame
+            b.MouseButton1Click:Connect(onClick)
+            return b
+        end
+        local function mkToggle(name, get, set)
+            local b
+            local function refresh()
+                b.Text = (get() and "V  " or "X  ") .. name
+                b.BackgroundColor3 = get()
+                    and Color3.fromRGB(34, 90, 64) or Color3.fromRGB(38, 38, 48)
+            end
+            b = mkBtn(name, 22, function()
+                set(not get())
+                refresh()
+            end)
+            refresh()
+        end
+
+        mkToggle("ESP охраны", function() return CFG.GuardESP ~= false end,
+            function(v) CFG.GuardESP = v end)
+        mkToggle("ESP зеков", function() return CFG.PrisonerESP ~= false end,
+            function(v) CFG.PrisonerESP = v end)
+        mkToggle("ESP преступников", function() return CFG.CriminalESP ~= false end,
+            function(v) CFG.CriminalESP = v end)
+        mkToggle("ESP прочих", function() return CFG.PlayerESP ~= false end,
+            function(v) CFG.PlayerESP = v end)
+        mkToggle("Коробки", function() return CFG.Boxes ~= false end,
+            function(v) CFG.Boxes = v end)
+        mkToggle("Скелет", function() return CFG.Skeleton == true end,
+            function(v) CFG.Skeleton = v end)
+        mkToggle("Полоски HP", function() return CFG.HealthBars ~= false end,
+            function(v) CFG.HealthBars = v end)
+        mkToggle("Стрелки к игрокам", function() return CFG.Snaplines ~= false end,
+            function(v) CFG.Snaplines = v end)
+        mkToggle("Стрелки за экраном", function() return CFG.OffArrows ~= false end,
+            function(v) CFG.OffArrows = v end)
+        mkToggle("Кольцо под целью", function() return CFG.GroundRing ~= false end,
+            function(v) CFG.GroundRing = v end)
+        mkToggle("Вектор движения", function() return CFG.MoveVec == true end,
+            function(v) CFG.MoveVec = v end)
+        mkToggle("Миникарта", function() return CFG.Minimap == true end,
+            function(v) CFG.Minimap = v end)
+        mkToggle("Предметы на земле", function() return CFG.Items ~= false end,
+            function(v) CFG.Items = v end)
+        mkToggle("Прятать мёртвых", function() return CFG.HideDead ~= false end,
+            function(v) CFG.HideDead = v end)
+        mkBtn("Дальность ESP: 300/600/1000/вся", 24, function()
+            local cur = tonumber(CFG.MaxDist) or 900
+            local opts = { 300, 600, 1000, 0 }
+            local nx = opts[1]
+            for i, o in ipairs(opts) do
+                if o == cur and opts[i + 1] then nx = opts[i + 1] end
+            end
+            CFG.MaxDist = nx
+            print("[PE] дальность ESP = " .. (nx == 0 and "вся карта" or nx))
+        end)
+        mkBtn("ТТХ пушек -> консоль", 22, function() G.PE.Guns() end)
+        mkBtn("Ремоуты -> консоль", 22, function() G.PE.Remotes() end)
+
+        fallbackGui = pg
+    end)
+    if not ok then
+        warn("[PE] фолбэк-меню не создалось: " .. tostring(err))
+    else
+        print("[PE] Rayfield недоступен — включено простое меню (перетаскивается мышью)")
+    end
+end
+
+-- ============================================================
 --  GUI (Rayfield)
 -- ============================================================
+-- Грузим с запасными URL: основной сайт бывает недоступен,
+-- тогда молчаливый pcall съедал ошибку и меню просто не появлялось.
+local RF_URLS = {
+    "https://sirius.menu/rayfield",
+    "https://raw.githubusercontent.com/shlexware/Rayfield/main/source",
+}
+for _, u in ipairs(RF_URLS) do
+    local ok, res = pcall(function()
+        local src = game:HttpGet(u, true)
+        if type(src) ~= "string" or #src < 200 then error("пустой ответ") end
+        local f = loadstring(src, "Rayfield")
+        if type(f) ~= "function" then error("loadstring вернул nil") end
+        local lib = f()
+        if type(lib) ~= "table" then error("не таблица: " .. typeof(lib)) end
+        return lib
+    end)
+    if ok and type(res) == "table" then
+        Rayfield = res
+        break
+    end
+    warn("[PE] Rayfield не загрузился (" .. u .. "): " .. tostring(res))
+end
+
 pcall(function()
-    Rayfield = loadstring(game:HttpGet(
-        "https://sirius.menu/rayfield", true))()
     local W = Rayfield:CreateWindow({
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v0.2",
+        LoadingSubtitle = "ESP + Разведка v0.3",
         ConfigurationSaving = { Enabled = true },
     })
 
@@ -1719,6 +1863,11 @@ pcall(function()
     end })
 end)
 
+-- Если Rayfield так и не загрузился — поднимаем простое меню.
+if not Rayfield then
+    buildFallbackGui()
+end
+
 -- ============================================================
 --  СТОП
 -- ============================================================
@@ -1740,14 +1889,22 @@ G.PE_Stop = function()
         if Screen then Screen:Destroy() end
         Screen = nil
     end)
+    pcall(function()
+        if fallbackGui then fallbackGui:Destroy() end
+        fallbackGui = nil
+    end)
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v0.2 остановлен")
+    print("[PE] v0.3 остановлен")
 end
 
-print("[PE] v0.2 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v0.3 запущен | Drawing=" .. tostring(DRAW_OK)
+    .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)")
+if not DRAW_OK then
+    warn("[PE] Drawing недоступен в этом исполнителе: коробки/скелет/стрелки/полоски HP/миникарта НЕ будут рисоваться. Работают только подписи над игроками и подсветка предметов.")
+end
