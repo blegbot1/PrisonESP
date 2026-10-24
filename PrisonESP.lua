@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v0.8
+--  PRISON ESP  v0.9
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1630,7 +1630,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v0.8 (простое меню)"
+        title.Text = "PRISON ESP v0.9 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1745,6 +1745,9 @@ end
 -- Грузим с запасными URL: основной сайт бывает недоступен,
 -- тогда молчаливый pcall съедал ошибку и меню просто не появлялось.
 local RF_URLS = {
+    -- Наша копия Rayfield: окно сразу создаётся в PlayerGui (патч),
+    -- а не в gethui-контейнере исполнителя, где клики не работают.
+    "https://raw.githubusercontent.com/blegbot1/PrisonESP/main/rayfield.lua",
     "https://sirius.menu/rayfield",
     "https://raw.githubusercontent.com/shlexware/Rayfield/main/source",
 }
@@ -1797,8 +1800,11 @@ end
 pcall(function()
     local W = Rayfield:CreateWindow({
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v0.8",
-        ConfigurationSaving = { Enabled = true },
+        LoadingSubtitle = "ESP + Разведка v0.9",
+        -- Сохранение настроек Rayfield выключено: оно требует writefile,
+        -- которого может не быть в исполнителе; наши настройки и так
+        -- живут в getgenv().PE.
+        ConfigurationSaving = { Enabled = false },
     })
 
     local T = W:CreateTab("ESP", "box")
@@ -2183,6 +2189,38 @@ task.delay(3, function()
     if not STOPPED then G.PE.Diag() end
 end)
 
+-- ТЕСТ-КНОПКА (зелёная, слева внизу): если её клик печатает строку
+-- [PE TEST], значит клики по созданному читом GUI в PlayerGui
+-- работают — и проблема внутри Rayfield, а не в исполнителе.
+local testSg = nil
+pcall(function()
+    local pg = LP:FindFirstChildOfClass("PlayerGui")
+    if not pg then return end
+    testSg = Instance.new("ScreenGui")
+    testSg.Name = "PE_TEST"
+    testSg.ResetOnSpawn = false
+    testSg.DisplayOrder = 200000
+    testSg.Parent = pg
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, 200, 0, 30)
+    b.Position = UDim2.new(0, 8, 1, -40)
+    b.BackgroundColor3 = Color3.fromRGB(20, 130, 90)
+    b.BorderColor3 = Color3.new(1, 1, 1)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 13
+    b.Text = "PE: ТЕСТ КЛИКА"
+    b.Parent = testSg
+    b.MouseButton1Click:Connect(function()
+        print("[PE TEST] КЛИК СРАБОТАЛ! MouseButton1Click в PlayerGui работает — исполнитель в порядке.")
+    end)
+    pcall(function()
+        b.TouchTap:Connect(function()
+            print("[PE TEST] ТАП СРАБОТАЛ! TouchTap в PlayerGui работает.")
+        end)
+    end)
+end)
+
 -- Если Rayfield так и не загрузился — поднимаем простое меню.
 if not Rayfield then
     buildFallbackGui()
@@ -2214,6 +2252,10 @@ G.PE_Stop = function()
         fallbackGui = nil
     end)
     pcall(function() clickConn:Disconnect() end)
+    pcall(function()
+        if testSg then testSg:Destroy() end
+        testSg = nil
+    end)
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     G.PE.Hit, G.PE.Ammo, G.PE.Team, G.PE.Diag = nil, nil, nil, nil
     local rfOld = Rayfield
@@ -2221,10 +2263,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v0.8 остановлен")
+    print("[PE] v0.9 остановлен")
 end
 
-print("[PE] v0.8 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v0.9 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
