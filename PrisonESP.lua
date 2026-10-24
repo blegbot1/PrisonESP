@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.4
+--  PRISON ESP  v2.5
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -138,6 +138,11 @@ CFG.PunchTeam  = pickOpt(CFG.PunchTeam, {
     "Все", "Кроме своей команды" }, "Кроме своей команды")
 -- АНТИ-СТАН: тазер/наручники/регдолл не должны останавливать.
 CFG.AntiStun = CFG.AntiStun ~= false
+-- Урон килл-ауры и бесконечные патроны. Подписура InflictTarget взята
+-- из декомпиляции GunScript_Local: (Humanoid, RootPart, урон,
+-- направление, отдача, вампиризм, поджог).
+CFG.KillAuraDamage = tonumber(CFG.KillAuraDamage) or 50
+CFG.InfAmmo = CFG.InfAmmo == true
 
 local STOPPED = false
 local Rayfield
@@ -1636,10 +1641,10 @@ G.PE.Hit = function(namePart, partName)
         print("[PE HIT] у " .. plr.Name .. " нет персонажа")
         return
     end
-    local part = (partName and ch:FindFirstChild(partName))
-        or ch:FindFirstChildOfClass("Humanoid")
-    if not part then
-        print("[PE HIT] у цели нет Humanoid")
+    local hum = ch:FindFirstChildOfClass("Humanoid")
+    local root = ch:FindFirstChild("HumanoidRootPart")
+    if not hum or not root then
+        print("[PE HIT] у цели нет Humanoid/RootPart")
         return
     end
     local remote, tool = myGunRemote("InflictTarget")
@@ -1648,14 +1653,16 @@ G.PE.Hit = function(namePart, partName)
         return
     end
     print("[PE HIT] " .. tool.Name .. ".InflictTarget -> " .. plr.Name
-        .. " (" .. part:GetFullName() .. "). СМОТРИ HP ЦЕЛИ!")
-    remote:FireServer(part)
+        .. " (точная подписура, урон " .. (tonumber(CFG.KillAuraDamage) or 50)
+        .. "). СМОТРИ HP ЦЕЛИ!")
+    remote:FireServer(hum, root, tonumber(CFG.KillAuraDamage) or 50,
+        Vector3.new(0, 0, 1), 0, false, false)
 end
 
 -- PE.Ammo(30, 30) — проба бесконечного магазина.
 G.PE.Ammo = function(a, c)
     a = tonumber(a) or 30
-    c = tonumber(c) or 30
+    c = tonumber(c) or 999999
     local remote, tool = myGunRemote("ChangeAmmoAndClip")
     if not remote then
         print("[PE AMMO] нет пушки с ChangeAmmoAndClip — возьми оружие")
@@ -1961,10 +1968,33 @@ local auraAt = 0
 local punchAt = 0
 local cuffAt = 0
 local stunAt = 0
+local ammoAt = 0
 local sprintAt = 0
 auraConn = RunService.Heartbeat:Connect(function()
     if STOPPED then return end
     local now = os.clock()
+    -- БЕСКОНЕЧНЫЕ ПАТРОНЫ: сам клиент при перезарядке сообщает серверу
+    -- магазин и запас через ChangeAmmoAndClip — делаем это сами.
+    if CFG.InfAmmo and now - ammoAt > 1 then
+        ammoAt = now
+        local chrI = LP.Character
+        local toolI = chrI and chrI:FindFirstChildOfClass("Tool")
+        if toolI then
+            local gsI = toolI:FindFirstChild("GunScript_Server")
+            local rI = gsI and gsI:FindFirstChild("ChangeAmmoAndClip")
+            if rI then
+                local clip = 30
+                local okS, m = pcall(function()
+                    return require(toolI:FindFirstChild("Setting"))
+                end)
+                if okS and type(m) == "table" and tonumber(m.AmmoPerClip) then
+                    clip = tonumber(m.AmmoPerClip)
+                end
+                pcall(function() rI:FireServer(clip, 999999) end)
+            end
+        end
+    end
+
     -- Вечный спринт: раз в 8 с напоминаем серверу, что мы бежим.
     if CFG.InfSprint then
         local okS, rS = pcall(function()
@@ -2214,16 +2244,16 @@ auraConn = RunService.Heartbeat:Connect(function()
                 local ok = targetAllowed(p, mode, myTeam)
                 if ok then
                     hits = hits + 1
-                    -- Разные версии gun-кита ждут разные аргументы
-                    -- (Humanoid / часть / пару) — пробуем все варианты:
-                    -- сработает тот, который понимает сервер.
-                    local head = ch:FindFirstChild("Head")
-                    pcall(function() remote:FireServer(hum) end)
-                    if head then
-                        pcall(function() remote:FireServer(head) end)
-                        pcall(function() remote:FireServer(hum, head) end)
-                    end
-                    pcall(function() remote:FireServer(root) end)
+                    -- ТОЧНАЯ подписура из декомпиляции GunScript_Local:
+                    -- (Humanoid, RootPart, урон, направление, отдача,
+                    -- вампиризм, поджог).
+                    local dmg = tonumber(CFG.KillAuraDamage) or 50
+                    local dir = Vector3.new(0, 0, 1)
+                    local delta = root.Position - myRoot.Position
+                    if delta.Magnitude > 0.01 then dir = delta.Unit end
+                    pcall(function()
+                        remote:FireServer(hum, root, dmg, dir, 0, false, false)
+                    end)
                 end
             end
         end
@@ -2265,7 +2295,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v2.4 (простое меню)"
+        title.Text = "PRISON ESP v2.5 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -2389,6 +2419,8 @@ local function buildFallbackGui()
             function(v) CFG.CuffAura = v end)
         mkToggle("Анти-стан", function() return CFG.AntiStun ~= false end,
             function(v) CFG.AntiStun = v end)
+        mkToggle("Бесконечные патроны", function() return CFG.InfAmmo == true end,
+            function(v) CFG.InfAmmo = v end)
         mkToggle("Вечный спринт", function() return CFG.InfSprint == true end,
             function(v) CFG.InfSprint = v end)
         mkBtn("Выдать всё оружие", 22, function() G.PE.GiveAll() end)
@@ -2467,7 +2499,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.4",
+        LoadingSubtitle = "ESP + Бой v2.5",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2753,7 +2785,7 @@ local okGUI, errGUI = pcall(function()
 
     C:CreateSection("Килл-аура (InflictTarget)")
     C:CreateParagraph({ Title = "Килл-аура",
-        Content = "Берёт пушку из рук/рюкзака и бьёт напрямую по Humanoid всех игроков в радиусе. Если проба урона на вкладке Разведка снижает HP — аура работает так же." })
+        Content = "Бьёт точно так, как стреляет сама пушка: InflictTarget(Humanoid, RootPart, урон, направление, отдача, вампиризм, поджог) — подписура из декомпиляции GunScript_Local. Нужна пушка в руках или рюкзаке." })
     C:CreateToggle({ Name = "Килл-аура", Flag = "PE_KillAura",
         CurrentValue = CFG.KillAura == true,
         Callback = function(v) CFG.KillAura = v end })
@@ -2761,6 +2793,10 @@ local okGUI, errGUI = pcall(function()
         Range = {10, 120}, Increment = 5,
         CurrentValue = tonumber(CFG.KillAuraRadius) or 40,
         Suffix = " st", Callback = function(v) CFG.KillAuraRadius = v end })
+    C:CreateSlider({ Name = "Урон за выстрел", Flag = "PE_KillAuraDamage",
+        Range = {10, 500}, Increment = 10,
+        CurrentValue = tonumber(CFG.KillAuraDamage) or 50,
+        Callback = function(v) CFG.KillAuraDamage = v end })
     C:CreateSlider({ Name = "Задержка между тиками", Flag = "PE_KillAuraDelay",
         Range = {10, 100}, Increment = 5,
         CurrentValue = math.floor((tonumber(CFG.KillAuraDelay) or 0.15) * 100 + 0.5),
@@ -2848,6 +2884,9 @@ local okGUI, errGUI = pcall(function()
     C:CreateToggle({ Name = "Анти-стан (тазер/наручники/регдолл)", Flag = "PE_AntiStun",
         CurrentValue = CFG.AntiStun ~= false,
         Callback = function(v) CFG.AntiStun = v end })
+    C:CreateToggle({ Name = "Бесконечные патроны", Flag = "PE_InfAmmo",
+        CurrentValue = CFG.InfAmmo == true,
+        Callback = function(v) CFG.InfAmmo = v end })
 
     C:CreateSection("Гивер оружия (клик-детекторы)")
     C:CreateParagraph({ Title = "Гивер",
@@ -3099,10 +3138,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v2.4 остановлен")
+    print("[PE] v2.5 остановлен")
 end
 
-print("[PE] v2.4 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.5 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
