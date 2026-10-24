@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v1.0
+--  PRISON ESP  v1.1
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1630,7 +1630,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v1.0 (простое меню)"
+        title.Text = "PRISON ESP v1.1 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1800,8 +1800,10 @@ end
 local guiOK = false
 local okGUI, errGUI = pcall(function()
     local W = Rayfield:CreateWindow({
+        Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
+                               -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v1.0",
+        LoadingSubtitle = "ESP + Разведка v1.1",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2302,10 +2304,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v1.0 остановлен")
+    print("[PE] v1.1 остановлен")
 end
 
-print("[PE] v1.0 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v1.1 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
