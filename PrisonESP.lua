@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v1.4
+--  PRISON ESP  v1.5
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -99,7 +99,9 @@ CFG.SnapArrowThick = math.clamp(tonumber(CFG.SnapArrowThick) or 2, 1, 6)
 CFG.SnapFrom      = pickOpt(CFG.SnapFrom, TRACER_ORIGINS, "Низ экрана")
 CFG.SnapAlpha     = math.clamp(tonumber(CFG.SnapAlpha) or 1, 0, 1)
 CFG.OffArrows     = CFG.OffArrows ~= false
-CFG.GroundRing    = CFG.GroundRing ~= false
+-- Кольцо под целью: по умолчанию ВЫКЛ (круги под ногами у всех
+-- раздражали) — включается тумблером во вкладке ESP.
+CFG.GroundRing    = CFG.GroundRing == true
 CFG.MoveVec       = CFG.MoveVec == true
 CFG.LiteESP       = CFG.LiteESP == true
 
@@ -1724,6 +1726,43 @@ G.PE.ResetMenu = function()
     r:FireServer()
 end
 
+-- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
+-- с какими аргументами игра честно стреляет InflictTarget.
+G.PE.GunSource = function()
+    if type(decompile) ~= "function" then
+        print("[PE SRC] в этом исполнителе нет функции decompile")
+        return
+    end
+    local any = false
+    local allTxt = {}
+    for _, t in ipairs(toolList()) do
+        for _, scrName in ipairs({ "GunScript_Local", "GunScript_Server" }) do
+            local scr = t:FindFirstChild(scrName)
+            if scr then
+                local ok, src = pcall(decompile, scr)
+                if ok and type(src) == "string" and #src > 0 then
+                    any = true
+                    local head = "[PE SRC] ===== " .. t.Name .. "." .. scrName
+                        .. " (" .. #src .. " байт) ====="
+                    print(head)
+                    allTxt[#allTxt + 1] = head .. "\n" .. src
+                else
+                    print("[PE SRC] " .. t.Name .. "." .. scrName
+                        .. ": decompile не удался: " .. tostring(src))
+                end
+            end
+        end
+    end
+    if not any then
+        print("[PE SRC] пушек в руках/рюкзаке нет — возьми оружие")
+        return
+    end
+    if type(writefile) == "function" then
+        pcall(writefile, "pe_gunsrc.txt", table.concat(allTxt, "\n\n"))
+        print("[PE SRC] полностью сохранено в pe_gunsrc.txt")
+    end
+end
+
 -- Цикл: килл-аура + поддержание вечного спринта.
 local auraAt = 0
 local sprintAt = 0
@@ -1769,7 +1808,16 @@ auraConn = RunService.Heartbeat:Connect(function()
                 end
                 if ok then
                     hits = hits + 1
+                    -- Разные версии gun-кита ждут разные аргументы
+                    -- (Humanoid / часть / пару) — пробуем все варианты:
+                    -- сработает тот, который понимает сервер.
+                    local head = ch:FindFirstChild("Head")
                     pcall(function() remote:FireServer(hum) end)
+                    if head then
+                        pcall(function() remote:FireServer(head) end)
+                        pcall(function() remote:FireServer(hum, head) end)
+                    end
+                    pcall(function() remote:FireServer(root) end)
                 end
             end
         end
@@ -1811,7 +1859,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v1.4 (простое меню)"
+        title.Text = "PRISON ESP v1.5 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1990,7 +2038,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v1.4",
+        LoadingSubtitle = "ESP + Бой v1.5",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2299,15 +2347,17 @@ local okGUI, errGUI = pcall(function()
 
     C:CreateSection("Гивер оружия (клик-детекторы)")
     C:CreateParagraph({ Title = "Гивер",
-        Content = "Выдаёт оружие/кейкарту через fireclickdetector по моделям на земле — дистанция и команда не проверяются. Возьми из рюкзака после выдачи." })
+        Content = "Выдаёт оружие/кейкарту через fireclickdetector по моделям на земле. Дистанция не проверяется. Если пушка НЕ выдаётся — её серверный скрипт, похоже, требует команду GUARD: сначала нажми «Команда: GUARD», потом выдай. Возьми оружие из рюкзака после выдачи." })
     C:CreateButton({ Name = "ВЫДАТЬ ВСЁ (пушки + KeyCard)",
         Callback = function() G.PE.GiveAll() end })
     for _, nm in ipairs(GIVE_ITEMS) do
         C:CreateButton({ Name = "Выдать: " .. nm,
             Callback = function() G.PE.Give(nm) end })
     end
-    C:CreateButton({ Name = "Открыть ВСЕ двери/камеры",
+    C:CreateButton({ Name = "Открыть ВСЕ двери (камеры тюрьмы)",
         Callback = function() G.PE.Doors() end })
+    C:CreateButton({ Name = "Исходники пушки -> консоль (decompile)",
+        Callback = function() G.PE.GunSource() end })
     guiOK = true
 end)
 if not okGUI then
@@ -2510,15 +2560,16 @@ G.PE_Stop = function()
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     G.PE.Hit, G.PE.Ammo, G.PE.Team, G.PE.Diag = nil, nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
+    G.PE.GunSource = nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v1.4 остановлен")
+    print("[PE] v1.5 остановлен")
 end
 
-print("[PE] v1.4 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v1.5 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
