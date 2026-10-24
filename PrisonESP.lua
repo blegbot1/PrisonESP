@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v1.3
+--  PRISON ESP  v1.4
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -111,9 +111,17 @@ CFG.MinimapSelf = CFG.MinimapSelf ~= false
 -- ---------- ESP: предметы на земле ----------
 CFG.Items = CFG.Items ~= false
 
+-- ---------- БОЕВЫЕ ----------
+CFG.KillAura       = CFG.KillAura == true
+CFG.KillAuraRadius = tonumber(CFG.KillAuraRadius) or 40
+CFG.KillAuraDelay  = tonumber(CFG.KillAuraDelay) or 0.15
+CFG.KillAuraTeam   = pickOpt(CFG.KillAuraTeam, {
+    "Все", "Кроме своей команды", "Только охрана" }, "Все")
+CFG.InfSprint      = CFG.InfSprint == true
+
 local STOPPED = false
 local Rayfield
-local mainConn, itemConn
+local mainConn, itemConn, auraConn
 local by = {}          -- [Player] = {char, gui, lbl, box, role, vis, roleAt}
 
 -- ============================================================
@@ -244,6 +252,13 @@ local function drawBox(b, root, cam)
         end
     end
     local cf = root.CFrame * CFrame.new(b.offLocal or Vector3.new(0, 0, 0))
+    -- ВПЛОТНУЮ К ЦЕЛИ: проекция рёбер раздувается на весь экран —
+    -- коробку прячем (вплотную игрок и так отлично виден).
+    local camPosNow = camera.CFrame and camera.CFrame.Position
+    if camPosNow and (cf.Position - camPosNow).Magnitude < 7 then
+        hideAll()
+        return
+    end
     local size = b.size or Vector3.new(2.6, 5.8, 2.2)
     local hw = size.X * 0.5 + (tonumber(CFG.BoxMargin) or 0)
     local hh = size.Y * 0.5 + (tonumber(CFG.BoxMargin) or 0)
@@ -1242,6 +1257,9 @@ mainConn = RunService.RenderStepped:Connect(function()
                         vis = CFG.PlayerESP ~= false
                         color = safeColor(CFG.ColOther, Color3.new(0.8, 0.8, 0.8))
                     end
+                    -- Свой персонаж: ESP не рисуем совсем (круг под
+                    -- ногами и скелет на себе не нужны).
+                    if plr == LP then vis = false end
 
                     local root = ch:FindFirstChild("HumanoidRootPart")
                     if root and myRoot and (tonumber(CFG.MaxDist) or 0) > 0 then
@@ -1635,6 +1653,130 @@ G.PE.Team = function(teamName)
 end
 
 -- ============================================================
+--  БОЕВЫЕ ФУНКЦИИ: гивер оружия, двери, спринт, килл-аура.
+-- ============================================================
+local GIVE_ITEMS = {
+    "M9", "AK-74", "M16a4 MOD", "MP5 Short", "SVD", "PPSH-41",
+    "MG42", "Kord", "Hammer", "KeyCard",
+}
+
+-- Гивер: модели оружия на земле с "Item Give script" почти наверняка
+-- работают через ClickDetector, а fireclickdetector игнорирует
+-- дистанцию и проверки.
+G.PE.Give = function(itemName)
+    if type(fireclickdetector) ~= "function" then
+        warn("[PE GIVE] в этом исполнителе нет fireclickdetector")
+        return false
+    end
+    for _, m in ipairs(workspace:GetChildren()) do
+        if m:IsA("Model") and m.Name == itemName then
+            local cd = m:FindFirstChildWhichIsA("ClickDetector", true)
+            if cd then
+                local ok = pcall(fireclickdetector, cd)
+                print("[PE GIVE] " .. itemName .. ": fireclickdetector("
+                    .. tostring(cd:GetFullName()) .. ") -> " .. tostring(ok))
+                return ok
+            end
+            warn("[PE GIVE] у '" .. itemName .. "' нет ClickDetector")
+            return false
+        end
+    end
+    print("[PE GIVE] модель '" .. tostring(itemName) .. "' на земле не найдена")
+    return false
+end
+
+G.PE.GiveAll = function()
+    local n = 0
+    for _, nm in ipairs(GIVE_ITEMS) do
+        if G.PE.Give(nm) then n = n + 1 end
+    end
+    print("[PE GIVE] выдано предметов: " .. n)
+end
+
+-- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
+G.PE.Doors = function()
+    if type(fireclickdetector) ~= "function" then
+        warn("[PE DOORS] нет fireclickdetector")
+        return
+    end
+    local n = 0
+    local f = workspace:FindFirstChild("Doors")
+    if not f then
+        print("[PE DOORS] папки Doors нет")
+        return
+    end
+    for _, d in ipairs(f:GetDescendants()) do
+        if d:IsA("ClickDetector") then
+            if pcall(fireclickdetector, d) then n = n + 1 end
+        end
+    end
+    print("[PE DOORS] кликнуто детекторов: " .. n)
+end
+
+-- Сброс в меню: выход из наручников/ареста без смерти.
+G.PE.ResetMenu = function()
+    local r = ReplicatedStorage:FindFirstChild("ResetToMenuEvent")
+    if not r or not r:IsA("RemoteEvent") then
+        print("[PE MENU] ResetToMenuEvent не найден")
+        return
+    end
+    print("[PE MENU] ResetToMenuEvent:FireServer()")
+    r:FireServer()
+end
+
+-- Цикл: килл-аура + поддержание вечного спринта.
+local auraAt = 0
+local sprintAt = 0
+auraConn = RunService.Heartbeat:Connect(function()
+    if STOPPED then return end
+    local now = os.clock()
+    -- Вечный спринт: раз в 8 с напоминаем серверу, что мы бежим.
+    if CFG.InfSprint then
+        local okS, rS = pcall(function()
+            local f = ReplicatedStorage:FindFirstChild("SprintRemotes")
+            return f and f:FindFirstChild("SprintRemote")
+        end)
+        if okS and rS and now - sprintAt > 8 then
+            sprintAt = now
+            pcall(function() rS:FireServer(true) end)
+        end
+    end
+    if not CFG.KillAura then return end
+    if now - auraAt < (tonumber(CFG.KillAuraDelay) or 0.15) then return end
+    auraAt = now
+    local myRoot = LP.Character
+        and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    local remote = myGunRemote("InflictTarget")
+    if not remote then return end   -- аура без пушки в руках не работает
+    local radius = tonumber(CFG.KillAuraRadius) or 40
+    local mode = CFG.KillAuraTeam or "Все"
+    local myTeam = LP.Team
+    local hits = 0
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and hits < 6 then
+            local ch = p.Character
+            local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+            local root = ch and ch:FindFirstChild("HumanoidRootPart")
+            if ch and hum and hum.Health > 0 and root
+               and (root.Position - myRoot.Position).Magnitude <= radius then
+                local ok = true
+                if mode == "Кроме своей команды"
+                   and myTeam and p.Team == myTeam then
+                    ok = false
+                elseif mode == "Только охрана" then
+                    ok = (roleOf(p) == "guard")
+                end
+                if ok then
+                    hits = hits + 1
+                    pcall(function() remote:FireServer(hum) end)
+                end
+            end
+        end
+    end
+end)
+
+-- ============================================================
 --  ПРОСТОЕ ФОЛБЭК-МЕНЮ (если Rayfield не загрузился вообще)
 -- ============================================================
 local fallbackGui = nil
@@ -1655,8 +1797,8 @@ local function buildFallbackGui()
         end
 
         local frame = Instance.new("Frame")
-        frame.Size = UDim2.new(0, 240, 0, 470)
-        frame.Position = UDim2.new(0, 14, 0.5, -235)
+        frame.Size = UDim2.new(0, 240, 0, 580)
+        frame.Position = UDim2.new(0, 14, 0.5, -290)
         frame.BackgroundColor3 = Color3.fromRGB(24, 24, 32)
         frame.BorderColor3 = Color3.fromRGB(70, 170, 255)
         frame.BorderSizePixel = 2
@@ -1669,7 +1811,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v1.3 (простое меню)"
+        title.Text = "PRISON ESP v1.4 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1768,6 +1910,12 @@ local function buildFallbackGui()
         end)
         mkBtn("ТТХ пушек -> консоль", 22, function() G.PE.Guns() end)
         mkBtn("Ремоуты -> консоль", 22, function() G.PE.Remotes() end)
+        mkToggle("Килл-аура", function() return CFG.KillAura == true end,
+            function(v) CFG.KillAura = v end)
+        mkToggle("Вечный спринт", function() return CFG.InfSprint == true end,
+            function(v) CFG.InfSprint = v end)
+        mkBtn("Выдать всё оружие", 22, function() G.PE.GiveAll() end)
+        mkBtn("Открыть все двери", 22, function() G.PE.Doors() end)
 
         fallbackGui = pg
     end)
@@ -1842,7 +1990,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v1.3",
+        LoadingSubtitle = "ESP + Бой v1.4",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2102,6 +2250,64 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.Team("Guard") end })
     R:CreateButton({ Name = "ПРОБА: смена команды Prisoner",
         Callback = function() G.PE.Team("Prisoner") end })
+
+    -- ====================== ВКЛАДКА БОЙ ======================
+    local C = safeNewTab(W, "Бой", "swords", "Бой")
+    if not C then error("вкладка Бой не создалась") end
+
+    C:CreateSection("Килл-аура (InflictTarget)")
+    C:CreateParagraph({ Title = "Килл-аура",
+        Content = "Берёт пушку из рук/рюкзака и бьёт напрямую по Humanoid всех игроков в радиусе. Если проба урона на вкладке Разведка снижает HP — аура работает так же." })
+    C:CreateToggle({ Name = "Килл-аура", Flag = "PE_KillAura",
+        CurrentValue = CFG.KillAura == true,
+        Callback = function(v) CFG.KillAura = v end })
+    C:CreateSlider({ Name = "Радиус ауры", Flag = "PE_KillAuraRadius",
+        Range = {10, 120}, Increment = 5,
+        CurrentValue = tonumber(CFG.KillAuraRadius) or 40,
+        Suffix = " st", Callback = function(v) CFG.KillAuraRadius = v end })
+    C:CreateSlider({ Name = "Задержка между тиками", Flag = "PE_KillAuraDelay",
+        Range = {10, 100}, Increment = 5,
+        CurrentValue = math.floor((tonumber(CFG.KillAuraDelay) or 0.15) * 100 + 0.5),
+        Suffix = " x10мс", Callback = function(v) CFG.KillAuraDelay = v / 100 end })
+    C:CreateDropdown({
+        Name = "Кого бить",
+        Flag = "PE_KillAuraTeamPick",
+        Options = { "Все", "Кроме своей команды", "Только охрана" },
+        CurrentOption = { CFG.KillAuraTeam },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG.KillAuraTeam = picked end
+        end,
+    })
+
+    C:CreateSection("Команда и статус")
+    C:CreateButton({ Name = "Команда: GUARD (охрана)",
+        Callback = function() G.PE.Team("Guard") end })
+    C:CreateButton({ Name = "Команда: PRISONER (зек)",
+        Callback = function() G.PE.Team("Prisoner") end })
+    C:CreateButton({ Name = "Команда: CRIMINAL",
+        Callback = function() G.PE.Team("Criminal") end })
+    C:CreateButton({ Name = "Сброс в меню (выход из наручников)",
+        Callback = function() G.PE.ResetMenu() end })
+
+    C:CreateSection("Движение")
+    C:CreateToggle({ Name = "Вечный спринт", Flag = "PE_InfSprint",
+        CurrentValue = CFG.InfSprint == true,
+        Callback = function(v) CFG.InfSprint = v end })
+
+    C:CreateSection("Гивер оружия (клик-детекторы)")
+    C:CreateParagraph({ Title = "Гивер",
+        Content = "Выдаёт оружие/кейкарту через fireclickdetector по моделям на земле — дистанция и команда не проверяются. Возьми из рюкзака после выдачи." })
+    C:CreateButton({ Name = "ВЫДАТЬ ВСЁ (пушки + KeyCard)",
+        Callback = function() G.PE.GiveAll() end })
+    for _, nm in ipairs(GIVE_ITEMS) do
+        C:CreateButton({ Name = "Выдать: " .. nm,
+            Callback = function() G.PE.Give(nm) end })
+    end
+    C:CreateButton({ Name = "Открыть ВСЕ двери/камеры",
+        Callback = function() G.PE.Doors() end })
     guiOK = true
 end)
 if not okGUI then
@@ -2218,10 +2424,10 @@ G.PE.Diag = function()
     print("========== [PE DIAG] КОНЕЦ ==========")
 end
 
--- Логгер кликов: видно, долетает ли нажатие до GUI и что под ним.
--- Выключить перед запуском: getgenv().PE_CLICKLOG = false
+-- Логгер кликов: выключен по умолчанию (шумит). Включить ПЕРЕД
+-- запуском: getgenv().PE_CLICKLOG = true
 local clickConn = nil
-if G.PE_CLICKLOG ~= false then
+if G.PE_CLICKLOG == true then
     pcall(function()
         local UIS = game:GetService("UserInputService")
         clickConn = UIS.InputBegan:Connect(function(inp, gp)
@@ -2269,38 +2475,6 @@ task.delay(3, function()
     if not STOPPED then G.PE.Diag() end
 end)
 
--- ТЕСТ-КНОПКА (зелёная, слева внизу): если её клик печатает строку
--- [PE TEST], значит клики по созданному читом GUI в PlayerGui
--- работают — и проблема внутри Rayfield, а не в исполнителе.
-local testSg = nil
-pcall(function()
-    local pg = LP:FindFirstChildOfClass("PlayerGui")
-    if not pg then return end
-    testSg = Instance.new("ScreenGui")
-    testSg.Name = "PE_TEST"
-    testSg.ResetOnSpawn = false
-    testSg.DisplayOrder = 200000
-    testSg.Parent = pg
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0, 200, 0, 30)
-    b.Position = UDim2.new(0, 8, 1, -40)
-    b.BackgroundColor3 = Color3.fromRGB(20, 130, 90)
-    b.BorderColor3 = Color3.new(1, 1, 1)
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.Font = Enum.Font.GothamBold
-    b.TextSize = 13
-    b.Text = "PE: ТЕСТ КЛИКА"
-    b.Parent = testSg
-    b.MouseButton1Click:Connect(function()
-        print("[PE TEST] КЛИК СРАБОТАЛ! MouseButton1Click в PlayerGui работает — исполнитель в порядке.")
-    end)
-    pcall(function()
-        b.TouchTap:Connect(function()
-            print("[PE TEST] ТАП СРАБОТАЛ! TouchTap в PlayerGui работает.")
-        end)
-    end)
-end)
-
 -- Если Rayfield не загрузился ИЛИ сборка меню упала — простое меню.
 if not Rayfield or not guiOK then
     buildFallbackGui()
@@ -2332,21 +2506,19 @@ G.PE_Stop = function()
         fallbackGui = nil
     end)
     pcall(function() clickConn:Disconnect() end)
-    pcall(function()
-        if testSg then testSg:Destroy() end
-        testSg = nil
-    end)
+    pcall(function() auraConn:Disconnect() end)
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     G.PE.Hit, G.PE.Ammo, G.PE.Team, G.PE.Diag = nil, nil, nil, nil
+    G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v1.3 остановлен")
+    print("[PE] v1.4 остановлен")
 end
 
-print("[PE] v1.3 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v1.4 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
