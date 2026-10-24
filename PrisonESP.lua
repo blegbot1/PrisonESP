@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.2
+--  PRISON ESP  v2.3
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -131,6 +131,9 @@ CFG.PunchDelay = tonumber(CFG.PunchDelay) or 0.25
 -- Подлёт ВКЛ по умолчанию: сервер кулаков бьёт только вплотную,
 -- поэтому аура сама телепортируется к жертве и возвращается.
 CFG.PunchTele  = CFG.PunchTele ~= false
+-- СТОЯТЬ У ЦЕЛИ: телепорт один раз и остаёмся рядом — удары без
+-- возвратов, максимальная частота. Дом вернём при выключении ауры.
+CFG.PunchStay  = CFG.PunchStay ~= false
 CFG.PunchTeam  = pickOpt(CFG.PunchTeam, {
     "Все", "Кроме своей команды" }, "Кроме своей команды")
 -- АНТИ-СТАН: тазер/наручники/регдолл не должны останавливать.
@@ -2014,6 +2017,16 @@ auraConn = RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- Возврат домой, когда punch-аура выключена.
+    if not CFG.PunchAura and CFG._punchHome then
+        local rootH = LP.Character
+            and LP.Character:FindFirstChild("HumanoidRootPart")
+        if rootH then
+            pcall(function() rootH.CFrame = CFG._punchHome end)
+        end
+        CFG._punchHome = nil
+    end
+
     -- PUNCH-АУРА: FistEvent("Punch") — сервер сам бьёт того, кто
     -- стоит рядом; кулаки экипируются автоматически.
     if CFG.PunchAura
@@ -2061,13 +2074,30 @@ auraConn = RunService.Heartbeat:Connect(function()
                         end
                     end
                 end
+                if not bestR and CFG._punchHome then
+                    -- Цели кончились — возвращаемся домой.
+                    local rootH2 = LP.Character
+                        and LP.Character:FindFirstChild("HumanoidRootPart")
+                    if rootH2 then
+                        pcall(function() rootH2.CFrame = CFG._punchHome end)
+                    end
+                    CFG._punchHome = nil
+                end
                 if bestR and ev then
                     if bestD <= 6 then
                         -- Уже впритык — просто бьём.
                         pcall(function() ev:FireServer("Punch") end)
+                    elseif CFG.PunchTele and CFG.PunchStay then
+                        -- РЕЖИМ «СТОЯТЬ У ЦЕЛИ»: телепорт один раз,
+                        -- дальше бьём без возвратов (сервер всегда видит
+                        -- нас рядом — попадания без промахов по таймингу).
+                        if not CFG._punchHome then
+                            CFG._punchHome = rootP.CFrame
+                        end
+                        rootP.CFrame = bestR.CFrame * CFrame.new(0, 0, 1.2)
+                        task.wait(0.05)
                     elseif CFG.PunchTele then
-                        -- Дальний: телепорт ВПЛОТНУЮ (1.2 ст за спину)
-                        -- → удар → возврат на место.
+                        -- Телепорт → удар → возврат.
                         local orig = rootP.CFrame
                         rootP.CFrame = bestR.CFrame * CFrame.new(0, 0, 1.2)
                         task.wait(0.08)
@@ -2216,7 +2246,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v2.2 (простое меню)"
+        title.Text = "PRISON ESP v2.3 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -2418,7 +2448,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.2",
+        LoadingSubtitle = "ESP + Бой v2.3",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2767,16 +2797,19 @@ local okGUI, errGUI = pcall(function()
 
     C:CreateSection("Кулаки (Punch-аура)")
     C:CreateParagraph({ Title = "Punch-аура",
-        Content = "Бьёт FistEvent(\"Punch\") — сервер наносит удар только ВПЛОТНУЮ. Поэтому «Бить дальних» (вкл по умолчанию) сам телепортируется к жертве вплотную, бьёт и возвращает тебя на место — бить можно с любого расстояния. Кулаки экипируются автоматически." })
+        Content = "Сервер кулаков бьёт только ВПЛОТНУЮ. Режим «Стоять у цели» (вкл по умолчанию): телепорт к жертве ОДИН раз, остаёшься рядом и бьёшь без возвратов — попадания без промахов по таймингу. Цель умерла → телепорт к следующей. Выключил ауру → вернулся домой." })
     C:CreateToggle({ Name = "Punch-аура", Flag = "PE_PunchAura",
         CurrentValue = CFG.PunchAura == true,
         Callback = function(v) CFG.PunchAura = v end })
     C:CreateSlider({ Name = "Задержка ударов", Flag = "PE_PunchDelay",
-        Range = {15, 100}, Increment = 5,
+        Range = {10, 100}, Increment = 5,
         CurrentValue = math.floor((tonumber(CFG.PunchDelay) or 0.25) * 100 + 0.5),
         Suffix = " x10мс", Callback = function(v) CFG.PunchDelay = v / 100 end })
+    C:CreateToggle({ Name = "Стоять у цели (макс. скорость)", Flag = "PE_PunchStay",
+        CurrentValue = CFG.PunchStay ~= false,
+        Callback = function(v) CFG.PunchStay = v end })
     C:CreateToggle({ Name = "Бить дальних (подлёт+удар+возврат)", Flag = "PE_PunchTele",
-        CurrentValue = CFG.PunchTele == true,
+        CurrentValue = CFG.PunchTele ~= false,
         Callback = function(v) CFG.PunchTele = v end })
 
     C:CreateSection("Команда и статус")
@@ -3047,10 +3080,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v2.2 остановлен")
+    print("[PE] v2.3 остановлен")
 end
 
-print("[PE] v2.2 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.3 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
