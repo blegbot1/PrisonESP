@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v1.1
+--  PRISON ESP  v1.2
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -468,6 +468,28 @@ local minimapBg = vSquare()
 local minimapBorder = vSquare()
 local minimapDots = {}
 local minimapSelf = vCircle()
+
+-- Самопроверка Drawing: сколько каких объектов реально создалось.
+-- Если исполнитель не поддерживает тип Square/Circle — будет 0,
+-- и полоски HP/кольца/миникарта рисовать нечем (линии — могут).
+do
+    local nL, nS, nC, nT = 0, 0, 0, 0
+    for i = 1, math.min(3, #vpool) do
+        local p = vpool[i]
+        if p.snap then nL = nL + 1 end
+        if p.hpBg then nS = nS + 1 end
+        if p.groundRing then nC = nC + 1 end
+        if p.hpText then nT = nT + 1 end
+    end
+    print(("[PE VIS] Drawing-объекты (3 слота): линии=%d квадраты=%d круги=%d текст=%d")
+        :format(nL, nS, nC, nT))
+    if nS == 0 then
+        warn("[PE VIS] квадраты (Square) НЕ создались — полоски HP/рамки головы/миникарта работать не будут")
+    end
+    if nC == 0 then
+        warn("[PE VIS] круги (Circle) НЕ создались — кольцо под целью работать не будет")
+    end
+end
 
 local function vProj(cam, pos)
     local ok, sp = pcall(function() return cam:WorldToViewportPoint(pos) end)
@@ -1304,7 +1326,13 @@ mainConn = RunService.RenderStepped:Connect(function()
         end
 
         -- Дополнительные визуалы (скелет/HP/стрелки/кольцо/миникарта).
-        pcall(VIS.update, cam, myRoot)
+        -- Ошибку кадра печатаем (не чаще раза в 5 с), а не глотаем:
+        -- как выяснилось на меню, молчаливый pcall прячет причину.
+        local okV, errV = pcall(VIS.update, cam, myRoot)
+        if not okV and os.clock() - (CFG._visErrAt or 0) > 5 then
+            CFG._visErrAt = os.clock()
+            warn("[PE VIS] ошибка кадра: " .. tostring(errV))
+        end
     end)
     if not ok then
         warn("[PE] кадр ESP: " .. tostring(err))
@@ -1630,7 +1658,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v1.1 (простое меню)"
+        title.Text = "PRISON ESP v1.2 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1803,7 +1831,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v1.1",
+        LoadingSubtitle = "ESP + Разведка v1.2",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2304,10 +2332,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v1.1 остановлен")
+    print("[PE] v1.2 остановлен")
 end
 
-print("[PE] v1.1 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v1.2 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
