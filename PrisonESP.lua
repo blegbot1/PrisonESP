@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v1.6
+--  PRISON ESP  v1.7
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -120,6 +120,19 @@ CFG.KillAuraDelay  = tonumber(CFG.KillAuraDelay) or 0.15
 CFG.KillAuraTeam   = pickOpt(CFG.KillAuraTeam, {
     "Все", "Кроме своей команды", "Только охрана" }, "Все")
 CFG.InfSprint      = CFG.InfSprint == true
+-- АИМ + АВТОСТРЕЛЬБА: честный выстрел самой игры (камера на врага +
+-- виртуальный клик) — работает всегда, когда работает обычная стрельба.
+CFG.AimFire        = CFG.AimFire == true
+CFG.AimFireRadius  = tonumber(CFG.AimFireRadius) or 120
+CFG.AimFireDelay   = tonumber(CFG.AimFireDelay) or 0.12
+CFG.AimFireTeam    = pickOpt(CFG.AimFireTeam, {
+    "Все", "Кроме своей команды", "Только охрана" }, "Все")
+-- PUNCH-АУРА: FistEvent("Punch") — сервер бьёт того, кто рядом.
+CFG.PunchAura = CFG.PunchAura == true
+CFG.PunchDelay = tonumber(CFG.PunchDelay) or 0.25
+CFG.PunchTele  = CFG.PunchTele == true
+CFG.PunchTeam  = pickOpt(CFG.PunchTeam, {
+    "Все", "Кроме своей команды" }, "Кроме своей команды")
 
 local STOPPED = false
 local Rayfield
@@ -1447,8 +1460,9 @@ local function toolList()
             if t:IsA("Tool") then out[#out + 1] = t end
         end
     end
-    grab(LP:FindFirstChild("Backpack"))
+    -- Сначала ЭКИПИРОВАННАЯ пушка (сервер проверяет руки), потом рюкзак.
     grab(LP.Character)
+    grab(LP:FindFirstChild("Backpack"))
     return out
 end
 
@@ -1786,8 +1800,47 @@ G.PE.GunSource = function()
     end
 end
 
--- Цикл: килл-аура + поддержание вечного спринта.
+-- Виртуальный ввод: мышь в центр экрана + клик ЛКМ. Нужен для
+-- аима с автострельбой — игра делает честный выстрел сама.
+local function vMouseMove(x, y)
+    if type(mousemoveabs) == "function" then
+        pcall(mousemoveabs, x, y)
+        return true
+    end
+    local ok = pcall(function()
+        game:GetService("VirtualInputManager"):SendMouseMoveEvent(x, y, game)
+    end)
+    return ok
+end
+
+local function vClick(cx, cy)
+    if type(mouse1press) == "function" and type(mouse1release) == "function" then
+        pcall(mouse1press)
+        pcall(mouse1release)
+        return true
+    end
+    local ok = pcall(function()
+        local VIM = game:GetService("VirtualInputManager")
+        VIM:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
+        VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
+    end)
+    return ok
+end
+
+local function targetAllowed(p, mode, myTeam)
+    if mode == "Кроме своей команды" then
+        return not (myTeam and p.Team == myTeam)
+    elseif mode == "Только охрана" then
+        return (roleOf(p) == "guard")
+    end
+    return true
+end
+
+-- Цикл: аим+автострельба, punch-аура, килл-аура, вечный спринт.
+local UIS2 = game:GetService("UserInputService")
 local auraAt = 0
+local aimAt = 0
+local punchAt = 0
 local sprintAt = 0
 auraConn = RunService.Heartbeat:Connect(function()
     if STOPPED then return end
@@ -1803,6 +1856,137 @@ auraConn = RunService.Heartbeat:Connect(function()
             pcall(function() rS:FireServer(true) end)
         end
     end
+
+    -- АИМ + АВТОСТРЕЛЬБА: камера на ближайшего врага, курсор в центр,
+    -- виртуальный ЛКМ — урон идёт по игре, обмануть невозможно.
+    if CFG.AimFire
+       and now - aimAt >= (tonumber(CFG.AimFireDelay) or 0.12) then
+        aimAt = now
+        local cam = workspace.CurrentCamera
+        local chr = LP.Character
+        local equipped = chr and chr:FindFirstChildOfClass("Tool")
+        local myRootA = chr and chr:FindFirstChild("HumanoidRootPart")
+        if cam and equipped and myRootA then
+            local vp = cam.ViewportSize
+            local cx2, cy2 = vp.X * 0.5, vp.Y * 0.5
+            local radius = tonumber(CFG.AimFireRadius) or 120
+            local mode = CFG.AimFireTeam or "Все"
+            local myTeam = LP.Team
+            local bestHead, bestScore
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LP then
+                    local ch2 = p.Character
+                    local hum2 = ch2 and ch2:FindFirstChildOfClass("Humanoid")
+                    local root2 = ch2 and ch2:FindFirstChild("HumanoidRootPart")
+                    local head2 = ch2 and ch2:FindFirstChild("Head")
+                    if ch2 and hum2 and hum2.Health > 0 and root2 and head2
+                       and (root2.Position - myRootA.Position).Magnitude <= radius
+                       and targetAllowed(p, mode, myTeam) then
+                        local sp = cam:WorldToViewportPoint(head2.Position)
+                        if sp.Z > 0 then
+                            local dx, dy = sp.X - cx2, sp.Y - cy2
+                            local score = dx * dx + dy * dy
+                            if not bestScore or score < bestScore then
+                                bestHead, bestScore = head2, score
+                            end
+                        end
+                    end
+                end
+            end
+            if bestHead then
+                -- Не воевать с меню: курсор над GUI — не крутим камеру
+                -- и не кликаем (иначе меню «багается» и не нажимается).
+                local overUI = false
+                local mloc = UIS2:GetMouseLocation()
+                local pgM = LP:FindFirstChildOfClass("PlayerGui")
+                if pgM then
+                    pcall(function()
+                        for _, obj in ipairs(pgM:GetGuiObjectsAtPosition(mloc.X, mloc.Y)) do
+                            if obj:IsA("GuiButton") or obj.Active then
+                                overUI = true
+                                break
+                            end
+                        end
+                    end)
+                end
+                if not overUI then
+                    vMouseMove(cx2, cy2)
+                    cam.CFrame = CFrame.new(cam.CFrame.Position, bestHead.Position)
+                    task.wait()
+                    vClick(cx2, cy2)
+                end
+            end
+        end
+    end
+
+    -- PUNCH-АУРА: FistEvent("Punch") — сервер сам бьёт того, кто
+    -- стоит рядом; кулаки экипируются автоматически.
+    if CFG.PunchAura
+       and now - punchAt >= (tonumber(CFG.PunchDelay) or 0.25) then
+        punchAt = now
+        local chrP = LP.Character
+        local humP = chrP and chrP:FindFirstChildOfClass("Humanoid")
+        local rootP = chrP and chrP:FindFirstChild("HumanoidRootPart")
+        if chrP and humP and rootP then
+            local fist, equipped = nil, false
+            for _, t in ipairs(chrP:GetChildren()) do
+                if t:IsA("Tool") and t:FindFirstChild("FistEvent") then
+                    fist, equipped = t, true
+                    break
+                end
+            end
+            if not fist then
+                local bp = LP:FindFirstChild("Backpack")
+                if bp then
+                    for _, t in ipairs(bp:GetChildren()) do
+                        if t:IsA("Tool") and t:FindFirstChild("FistEvent") then
+                            fist = t
+                            break
+                        end
+                    end
+                end
+            end
+            if fist then
+                if not equipped then
+                    pcall(function() humP:EquipTool(fist) end)
+                end
+                local ev = fist:FindFirstChild("FistEvent")
+                local bestR, bestD = nil, nil
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LP then
+                        local ch3 = p.Character
+                        local h3 = ch3 and ch3:FindFirstChildOfClass("Humanoid")
+                        local r3 = ch3 and ch3:FindFirstChild("HumanoidRootPart")
+                        if ch3 and h3 and h3.Health > 0 and r3
+                           and targetAllowed(p, CFG.PunchTeam or "Все", LP.Team) then
+                            local d = (r3.Position - rootP.Position).Magnitude
+                            if not bestD or d < bestD then
+                                bestR, bestD = r3, d
+                            end
+                        end
+                    end
+                end
+                if bestR and ev then
+                    if bestD <= 10 then
+                        pcall(function() ev:FireServer("Punch") end)
+                    elseif CFG.PunchTele then
+                        -- Подлететь-ударить-вернуться.
+                        local orig = rootP.CFrame
+                        rootP.CFrame = bestR.CFrame + Vector3.new(0, 0, 2.5)
+                        task.wait(0.1)
+                        pcall(function() ev:FireServer("Punch") end)
+                        task.wait(0.1)
+                        local rootNow = LP.Character
+                            and LP.Character:FindFirstChild("HumanoidRootPart")
+                        if rootNow then
+                            pcall(function() rootNow.CFrame = orig end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     if not CFG.KillAura then return end
     if now - auraAt < (tonumber(CFG.KillAuraDelay) or 0.15) then return end
     auraAt = now
@@ -1822,13 +2006,7 @@ auraConn = RunService.Heartbeat:Connect(function()
             local root = ch and ch:FindFirstChild("HumanoidRootPart")
             if ch and hum and hum.Health > 0 and root
                and (root.Position - myRoot.Position).Magnitude <= radius then
-                local ok = true
-                if mode == "Кроме своей команды"
-                   and myTeam and p.Team == myTeam then
-                    ok = false
-                elseif mode == "Только охрана" then
-                    ok = (roleOf(p) == "guard")
-                end
+                local ok = targetAllowed(p, mode, myTeam)
                 if ok then
                     hits = hits + 1
                     -- Разные версии gun-кита ждут разные аргументы
@@ -1882,7 +2060,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v1.6 (простое меню)"
+        title.Text = "PRISON ESP v1.7 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1983,6 +2161,10 @@ local function buildFallbackGui()
         mkBtn("Ремоуты -> консоль", 22, function() G.PE.Remotes() end)
         mkToggle("Килл-аура", function() return CFG.KillAura == true end,
             function(v) CFG.KillAura = v end)
+        mkToggle("Аим + автострельба", function() return CFG.AimFire == true end,
+            function(v) CFG.AimFire = v end)
+        mkToggle("Punch-аура", function() return CFG.PunchAura == true end,
+            function(v) CFG.PunchAura = v end)
         mkToggle("Вечный спринт", function() return CFG.InfSprint == true end,
             function(v) CFG.InfSprint = v end)
         mkBtn("Выдать всё оружие", 22, function() G.PE.GiveAll() end)
@@ -2061,7 +2243,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v1.6",
+        LoadingSubtitle = "ESP + Бой v1.7",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2353,6 +2535,47 @@ local okGUI, errGUI = pcall(function()
         end,
     })
 
+    C:CreateSection("Аим + автострельба (честный выстрел)")
+    C:CreateParagraph({ Title = "Аим + автоогонь",
+        Content = "Крутит камеру на ближайшего врага, наводит курсор в центр экрана и жмёт ЛКМ виртуально — игра сама делает настоящий выстрел со своим уроном. Работает всегда, когда работает обычная стрельба. Требует ЭКИПИРОВАННУЮ пушку в руках." })
+    C:CreateToggle({ Name = "Аим + автострельба", Flag = "PE_AimFire",
+        CurrentValue = CFG.AimFire == true,
+        Callback = function(v) CFG.AimFire = v end })
+    C:CreateSlider({ Name = "Радиус цели", Flag = "PE_AimFireRadius",
+        Range = {20, 300}, Increment = 10,
+        CurrentValue = tonumber(CFG.AimFireRadius) or 120,
+        Suffix = " st", Callback = function(v) CFG.AimFireRadius = v end })
+    C:CreateSlider({ Name = "Задержка выстрелов", Flag = "PE_AimFireDelay",
+        Range = {5, 100}, Increment = 5,
+        CurrentValue = math.floor((tonumber(CFG.AimFireDelay) or 0.12) * 100 + 0.5),
+        Suffix = " x10мс", Callback = function(v) CFG.AimFireDelay = v / 100 end })
+    C:CreateDropdown({
+        Name = "Кого стрелять",
+        Flag = "PE_AimFireTeamPick",
+        Options = { "Все", "Кроме своей команды", "Только охрана" },
+        CurrentOption = { CFG.AimFireTeam },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG.AimFireTeam = picked end
+        end,
+    })
+
+    C:CreateSection("Кулаки (Punch-аура)")
+    C:CreateParagraph({ Title = "Punch-аура",
+        Content = "Бьёт FistEvent(\"Punch\") — сервер наносит удар тому, кто стоит рядом. Кулаки из рюкзака экипируются автоматически. Дальних врагов можно бить с подлётом (телепорт → удар → возврат)." })
+    C:CreateToggle({ Name = "Punch-аура", Flag = "PE_PunchAura",
+        CurrentValue = CFG.PunchAura == true,
+        Callback = function(v) CFG.PunchAura = v end })
+    C:CreateSlider({ Name = "Задержка ударов", Flag = "PE_PunchDelay",
+        Range = {15, 100}, Increment = 5,
+        CurrentValue = math.floor((tonumber(CFG.PunchDelay) or 0.25) * 100 + 0.5),
+        Suffix = " x10мс", Callback = function(v) CFG.PunchDelay = v / 100 end })
+    C:CreateToggle({ Name = "Бить дальних (подлёт+удар+возврат)", Flag = "PE_PunchTele",
+        CurrentValue = CFG.PunchTele == true,
+        Callback = function(v) CFG.PunchTele = v end })
+
     C:CreateSection("Команда и статус")
     C:CreateButton({ Name = "Команда: GUARD (охрана)",
         Callback = function() G.PE.Team("Guard") end })
@@ -2589,10 +2812,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v1.6 остановлен")
+    print("[PE] v1.7 остановлен")
 end
 
-print("[PE] v1.6 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v1.7 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
