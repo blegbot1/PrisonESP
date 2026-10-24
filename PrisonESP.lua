@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v0.6
+--  PRISON ESP  v0.7
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1630,7 +1630,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v0.6 (простое меню)"
+        title.Text = "PRISON ESP v0.7 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -1748,6 +1748,8 @@ local RF_URLS = {
     "https://sirius.menu/rayfield",
     "https://raw.githubusercontent.com/shlexware/Rayfield/main/source",
 }
+local rfSource = nil   -- с какого URL загрузился Rayfield
+local rfMovedN = 0     -- сколько ScreenGui перенесено в PlayerGui
 -- Аварийный флаг: getgenv().PE_SIMPLE = true ДО запуска скрипта —
 -- Rayfield пропускается сразу, включается простое меню (если сам
 -- Rayfield грузится, но кнопки в нём мёртвые).
@@ -1767,6 +1769,7 @@ for _, u in ipairs(RF_URLS) do
     end)
     if ok and type(res) == "table" then
         Rayfield = res
+        rfSource = u
         break
     end
     warn("[PE] Rayfield не загрузился (" .. u .. "): " .. tostring(res))
@@ -1794,7 +1797,7 @@ end
 pcall(function()
     local W = Rayfield:CreateWindow({
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Разведка v0.6",
+        LoadingSubtitle = "ESP + Разведка v0.7",
         ConfigurationSaving = { Enabled = true },
     })
 
@@ -2033,6 +2036,7 @@ local function rescueRayfield()
                 c.ResetOnSpawn = false
                 c.DisplayOrder = 100000
                 c.Parent = pg
+                rfMovedN = rfMovedN + 1
                 moved = true
             end
         end
@@ -2043,6 +2047,113 @@ local function rescueRayfield()
 end
 task.delay(0.5, rescueRayfield)
 task.delay(2, rescueRayfield)
+
+-- ============================================================
+--  ДИАГНОСТИКА: PE.Diag() + логгер каждого клика.
+-- ============================================================
+G.PE.Diag = function()
+    print("========== [PE DIAG] НАЧАЛО ==========")
+    do
+        local okEx, ex = pcall(function()
+            return identifyexecutor and identifyexecutor() or "?"
+        end)
+        print("[PE DIAG] исполнитель: " .. (okEx and tostring(ex) or "?"))
+    end
+    print("[PE DIAG] Drawing=" .. tostring(DRAW_OK)
+        .. " | Rayfield=" .. tostring(Rayfield ~= nil)
+        .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
+        .. " | ScreenGui перенесено в PlayerGui=" .. tostring(rfMovedN))
+    do
+        local hasGethui = typeof(gethui) == "function"
+        print("[PE DIAG] gethui: " .. (hasGethui and "есть" or "НЕТ"))
+        if hasGethui then
+            local okH, h = pcall(gethui)
+            print("[PE DIAG] gethui() -> " .. (okH and tostring(h) or ("ошибка: " .. tostring(h))))
+        end
+    end
+    local function dumpCont(label, cont)
+        if not cont then
+            print("[PE DIAG] " .. label .. ": контейнера нет")
+            return
+        end
+        local n = 0
+        pcall(function()
+            for _, c in ipairs(cont:GetChildren()) do
+                if c:IsA("ScreenGui") then
+                    n = n + 1
+                    print(("[PE DIAG] %s: ScreenGui '%s' | Order=%d | Enabled=%s | детей=%d"):format(
+                        label, c.Name, c.DisplayOrder, tostring(c.Enabled), #c:GetChildren()))
+                end
+            end
+        end)
+        if n == 0 then
+            print("[PE DIAG] " .. label .. ": ScreenGui НЕТ")
+        end
+    end
+    dumpCont("PlayerGui", LP:FindFirstChildOfClass("PlayerGui"))
+    dumpCont("CoreGui", CoreGui)
+    if typeof(gethui) == "function" then
+        local okH, h = pcall(gethui)
+        if okH and h then dumpCont("gethui", h) end
+    end
+    if fallbackGui then
+        print("[PE DIAG] простое меню: создано, parent=" .. tostring(fallbackGui.Parent))
+    else
+        print("[PE DIAG] простое меню: не создавалось")
+    end
+    print("========== [PE DIAG] КОНЕЦ ==========")
+end
+
+-- Логгер кликов: видно, долетает ли нажатие до GUI и что под ним.
+-- Выключить перед запуском: getgenv().PE_CLICKLOG = false
+local clickConn = nil
+if G.PE_CLICKLOG ~= false then
+    pcall(function()
+        local UIS = game:GetService("UserInputService")
+        clickConn = UIS.InputBegan:Connect(function(inp, gp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1
+               or inp.UserInputType == Enum.UserInputType.Touch then
+                local pos = inp.Position
+                local x, y = math.floor(pos.X + 0.5), math.floor(pos.Y + 0.5)
+                local pg = LP:FindFirstChildOfClass("PlayerGui")
+                local found = {}
+                if pg then
+                    pcall(function()
+                        for _, obj in ipairs(pg:GetGuiObjectsAtPosition(x, y)) do
+                            if #found < 5 then
+                                local chain = obj.Name
+                                local p = obj
+                                for _ = 1, 4 do
+                                    p = p.Parent
+                                    if not p then break end
+                                    chain = p.Name .. "/" .. chain
+                                    if p == pg then break end
+                                end
+                                found[#found + 1] = chain
+                                    .. " [Z=" .. tostring(obj.ZIndex)
+                                    .. " Active=" .. tostring(obj.Active) .. "]"
+                            end
+                        end
+                    end)
+                end
+                local tag = gp and "GUI" or "МИР"
+                if #found > 0 then
+                    print("[PE CLICK " .. tag .. "] " .. x .. "," .. y
+                        .. " -> " .. table.concat(found, " | "))
+                else
+                    print("[PE CLICK " .. tag .. "] " .. x .. "," .. y
+                        .. " -> под курсором нет GUI (в PlayerGui)")
+                end
+            end
+        end)
+        print("[PE] логгер кликов ВКЛ (выключить: getgenv().PE_CLICKLOG=false и перезапуск)")
+    end)
+end
+
+-- Автодиагностика через 3 секунды после запуска.
+task.delay(3, function()
+    if not STOPPED then G.PE.Diag() end
+end)
 
 -- Если Rayfield так и не загрузился — поднимаем простое меню.
 if not Rayfield then
@@ -2074,20 +2185,22 @@ G.PE_Stop = function()
         if fallbackGui then fallbackGui:Destroy() end
         fallbackGui = nil
     end)
+    pcall(function() clickConn:Disconnect() end)
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
-    G.PE.Hit, G.PE.Ammo, G.PE.Team = nil, nil, nil
+    G.PE.Hit, G.PE.Ammo, G.PE.Team, G.PE.Diag = nil, nil, nil, nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v0.6 остановлен")
+    print("[PE] v0.7 остановлен")
 end
 
-print("[PE] v0.6 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v0.7 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
+    .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
-    .. " / PE.Hit(\"часть ника\") / PE.Ammo() / PE.Team(\"Guard\")")
+    .. " / PE.Hit(\"часть ника\") / PE.Ammo() / PE.Team(\"Guard\") / PE.Diag()")
 if not DRAW_OK then
     warn("[PE] Drawing недоступен в этом исполнителе: коробки/скелет/стрелки/полоски HP/миникарта НЕ будут рисоваться. Работают только подписи над игроками и подсветка предметов.")
 end
