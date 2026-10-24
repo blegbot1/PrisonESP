@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v1.9
+--  PRISON ESP  v2.0
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1614,6 +1614,10 @@ end
 -- PE.Hit("часть ника") — выстрел урона по игроку через пушку в руках.
 -- Второй аргумент (необяз.): имя части, по умолчанию Humanoid.
 G.PE.Hit = function(namePart, partName)
+    if not namePart or namePart == "" then
+        print("[PE HIT] сначала выбери игрока в списке")
+        return
+    end
     local plr = findPlayer(namePart)
     if not plr then
         print("[PE HIT] игрок по '" .. tostring(namePart)
@@ -1764,6 +1768,10 @@ end
 -- Телепорт за спину игрока (как «тот чел»: появился рядом — и сразу
 -- наручники/удар). Клиентский телепорт игра не проверяет.
 G.PE.TP = function(namePart)
+    if not namePart or namePart == "" then
+        print("[PE TP] сначала выбери игрока в списке")
+        return
+    end
     local plr = findPlayer(namePart)
     if not plr then
         print("[PE TP] игрок по '" .. tostring(namePart) .. "' не найден")
@@ -1784,6 +1792,10 @@ end
 -- Наручники на игрока: CuffEvent с вариантами аргументов.
 -- Handcuffs выдаются за GUARD — сначала кнопка команды.
 G.PE.Cuff = function(namePart)
+    if not namePart or namePart == "" then
+        print("[PE CUFF] сначала выбери игрока в списке")
+        return
+    end
     local plr = findPlayer(namePart)
     if not plr then
         print("[PE CUFF] игрок по '" .. tostring(namePart) .. "' не найден")
@@ -2138,7 +2150,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v1.9 (простое меню)"
+        title.Text = "PRISON ESP v2.0 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -2235,6 +2247,23 @@ local function buildFallbackGui()
             CFG.MaxDist = nx
             print("[PE] дальность ESP = " .. (nx == 0 and "вся карта" or nx))
         end)
+        mkBtn("Цель: следующий игрок", 22, function()
+            local opts = {}
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LP then opts[#opts + 1] = p.Name end
+            end
+            if #opts == 0 then
+                print("[PE] других игроков нет")
+                return
+            end
+            local nx = opts[1]
+            for i, o in ipairs(opts) do
+                if o == CFG._target and opts[i + 1] then nx = opts[i + 1] end
+            end
+            CFG._target = nx
+            print("[PE] цель = " .. nx)
+        end)
+        mkBtn("Проба урона по цели", 22, function() G.PE.Hit(CFG._target) end)
         mkBtn("ТТХ пушек -> консоль", 22, function() G.PE.Guns() end)
         mkBtn("Ремоуты -> консоль", 22, function() G.PE.Remotes() end)
         mkToggle("Килл-аура", function() return CFG.KillAura == true end,
@@ -2321,7 +2350,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v1.9",
+        LoadingSubtitle = "ESP + Бой v2.0",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2567,14 +2596,26 @@ local okGUI, errGUI = pcall(function()
     R:CreateSection("Пробы в один клик")
     R:CreateParagraph({ Title = "Пробы",
         Content = "Введи ЧАСТЬ ника врага и жми кнопки. Смотри на HP/патроны/команду цели после нажатия. Проба урона требует пушку в руках или рюкзаке." })
-    R:CreateInput({
-        Name = "Ник врага (можно часть)",
-        PlaceholderText = "например: vasya",
-        RemoveTextAfterFocusLost = false,
-        Callback = function(txt) CFG._hitName = txt end,
+    local opts0 = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then opts0[#opts0 + 1] = p.Name end
+    end
+    table.sort(opts0)
+    local hitDrop = R:CreateDropdown({
+        Name = "Цель (выбери игрока из списка)",
+        Flag = "PE_TargetPick1",
+        Options = opts0,
+        CurrentOption = {},
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG._target = picked end
+        end,
     })
+    targetPickers[#targetPickers + 1] = hitDrop
     R:CreateButton({ Name = "ПРОБА: урон по игроку (InflictTarget)",
-        Callback = function() G.PE.Hit(CFG._hitName) end })
+        Callback = function() G.PE.Hit(CFG._target) end })
     R:CreateButton({ Name = "ПРОБА: патроны 30/30 (ChangeAmmoAndClip)",
         Callback = function() G.PE.Ammo(30, 30) end })
     R:CreateButton({ Name = "ПРОБА: смена команды Guard",
@@ -2623,21 +2664,33 @@ local okGUI, errGUI = pcall(function()
     C:CreateSection("Наручники и телепорт")
     C:CreateParagraph({ Title = "Наручники и телепорт",
         Content = "Комбо «того чела»: телепорт за спину жертве + мгновенные наручники через CuffEvent. Наручники (Handcuffs) есть только у GUARD — сначала нажми «Команда: GUARD», заспавнься, потом используй кнопки." })
-    C:CreateInput({
-        Name = "Ник жертвы (можно часть)",
-        PlaceholderText = "например: vasya",
-        RemoveTextAfterFocusLost = false,
-        Callback = function(txt) CFG._cuffName = txt end,
+    local opts1 = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then opts1[#opts1 + 1] = p.Name end
+    end
+    table.sort(opts1)
+    local cuffDrop = C:CreateDropdown({
+        Name = "Жертва (выбери игрока из списка)",
+        Flag = "PE_TargetPick2",
+        Options = opts1,
+        CurrentOption = {},
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG._target = picked end
+        end,
     })
+    targetPickers[#targetPickers + 1] = cuffDrop
     C:CreateButton({ Name = "ТЕЛЕПОРТ к игроку (за спину)",
-        Callback = function() G.PE.TP(CFG._cuffName) end })
+        Callback = function() G.PE.TP(CFG._target) end })
     C:CreateButton({ Name = "НАРУЧНИКИ на игрока",
-        Callback = function() G.PE.Cuff(CFG._cuffName) end })
+        Callback = function() G.PE.Cuff(CFG._target) end })
     C:CreateButton({ Name = "ТЕЛЕПОРТ + НАРУЧНИКИ (комбо)",
         Callback = function()
-            G.PE.TP(CFG._cuffName)
+            G.PE.TP(CFG._target)
             task.wait(0.15)
-            G.PE.Cuff(CFG._cuffName)
+            G.PE.Cuff(CFG._target)
         end })
     C:CreateToggle({ Name = "Cuff-аура (сковывать ближайшего врага)",
         Flag = "PE_CuffAura",
@@ -2859,6 +2912,34 @@ if not Rayfield or not guiOK then
 end
 
 -- ============================================================
+--  ВЫБОР ЦЕЛИ: выпадающие списки игроков (обновляются сами).
+-- ============================================================
+local function playerOpts()
+    local opts = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then opts[#opts + 1] = p.Name end
+    end
+    table.sort(opts)
+    return opts
+end
+
+local targetPickers = {}   -- созданные Rayfield-дропдауны цели
+local function refreshTargetPickers()
+    local opts = playerOpts()
+    for _, d in ipairs(targetPickers) do
+        pcall(function() d:Set(opts) end)
+    end
+end
+
+task.spawn(function()
+    task.wait(3)
+    while not STOPPED do
+        refreshTargetPickers()
+        task.wait(5)
+    end
+end)
+
+-- ============================================================
 --  СТОП
 -- ============================================================
 G.PE_Stop = function()
@@ -2895,10 +2976,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v1.9 остановлен")
+    print("[PE] v2.0 остановлен")
 end
 
-print("[PE] v1.9 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.0 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
