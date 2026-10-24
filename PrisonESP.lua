@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v1.7
+--  PRISON ESP  v1.8
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -120,13 +120,11 @@ CFG.KillAuraDelay  = tonumber(CFG.KillAuraDelay) or 0.15
 CFG.KillAuraTeam   = pickOpt(CFG.KillAuraTeam, {
     "Все", "Кроме своей команды", "Только охрана" }, "Все")
 CFG.InfSprint      = CFG.InfSprint == true
--- АИМ + АВТОСТРЕЛЬБА: честный выстрел самой игры (камера на врага +
--- виртуальный клик) — работает всегда, когда работает обычная стрельба.
-CFG.AimFire        = CFG.AimFire == true
-CFG.AimFireRadius  = tonumber(CFG.AimFireRadius) or 120
-CFG.AimFireDelay   = tonumber(CFG.AimFireDelay) or 0.12
-CFG.AimFireTeam    = pickOpt(CFG.AimFireTeam, {
-    "Все", "Кроме своей команды", "Только охрана" }, "Все")
+-- НАРУЧНИКИ: CuffEvent сковывает игрока. Handcuffs выдаются за
+-- GUARD (команда переключается мгновенно кнопкой).
+CFG.CuffAura = CFG.CuffAura == true
+CFG.CuffTeam = pickOpt(CFG.CuffTeam, {
+    "Все", "Кроме своей команды" }, "Кроме своей команды")
 -- PUNCH-АУРА: FistEvent("Punch") — сервер бьёт того, кто рядом.
 CFG.PunchAura = CFG.PunchAura == true
 CFG.PunchDelay = tonumber(CFG.PunchDelay) or 0.25
@@ -1763,6 +1761,61 @@ G.PE.ResetMenu = function()
     r:FireServer()
 end
 
+-- Телепорт за спину игрока (как «тот чел»: появился рядом — и сразу
+-- наручники/удар). Клиентский телепорт игра не проверяет.
+G.PE.TP = function(namePart)
+    local plr = findPlayer(namePart)
+    if not plr then
+        print("[PE TP] игрок по '" .. tostring(namePart) .. "' не найден")
+        return
+    end
+    local ch = plr.Character
+    local root = ch and ch:FindFirstChild("HumanoidRootPart")
+    local myRoot = LP.Character
+        and LP.Character:FindFirstChild("HumanoidRootPart")
+    if root and myRoot then
+        myRoot.CFrame = root.CFrame * CFrame.new(0, 0, 2.5)
+        print("[PE TP] телепорт за спину: " .. plr.Name)
+    else
+        print("[PE TP] у цели нет персонажа")
+    end
+end
+
+-- Наручники на игрока: CuffEvent с вариантами аргументов.
+-- Handcuffs выдаются за GUARD — сначала кнопка команды.
+G.PE.Cuff = function(namePart)
+    local plr = findPlayer(namePart)
+    if not plr then
+        print("[PE CUFF] игрок по '" .. tostring(namePart) .. "' не найден")
+        return
+    end
+    local tool, equipped = findToolWith("CuffEvent")
+    if not tool then
+        print("[PE CUFF] нет наручников: нажми «Команда: GUARD», заспавнься и возьми Handcuffs")
+        return
+    end
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if not equipped and hum then
+        pcall(function() hum:EquipTool(tool) end)
+        task.wait(0.1)
+    end
+    local ev = tool:FindFirstChild("CuffEvent")
+    local ch = plr.Character
+    if not ev then
+        print("[PE CUFF] CuffEvent не найден в тулле")
+        return
+    end
+    pcall(function() ev:FireServer(plr) end)
+    if ch then
+        pcall(function() ev:FireServer(ch) end)
+        local root = ch:FindFirstChild("HumanoidRootPart")
+        local hd = ch:FindFirstChildOfClass("Humanoid")
+        if root then pcall(function() ev:FireServer(root) end) end
+        if hd then pcall(function() ev:FireServer(hd) end) end
+    end
+    print("[PE CUFF] CuffEvent -> " .. plr.Name .. " (4 варианта аргументов)")
+end
+
 -- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
 -- с какими аргументами игра честно стреляет InflictTarget.
 G.PE.GunSource = function()
@@ -1800,33 +1853,6 @@ G.PE.GunSource = function()
     end
 end
 
--- Виртуальный ввод: мышь в центр экрана + клик ЛКМ. Нужен для
--- аима с автострельбой — игра делает честный выстрел сама.
-local function vMouseMove(x, y)
-    if type(mousemoveabs) == "function" then
-        pcall(mousemoveabs, x, y)
-        return true
-    end
-    local ok = pcall(function()
-        game:GetService("VirtualInputManager"):SendMouseMoveEvent(x, y, game)
-    end)
-    return ok
-end
-
-local function vClick(cx, cy)
-    if type(mouse1press) == "function" and type(mouse1release) == "function" then
-        pcall(mouse1press)
-        pcall(mouse1release)
-        return true
-    end
-    local ok = pcall(function()
-        local VIM = game:GetService("VirtualInputManager")
-        VIM:SendMouseButtonEvent(cx, cy, 0, true, game, 0)
-        VIM:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
-    end)
-    return ok
-end
-
 local function targetAllowed(p, mode, myTeam)
     if mode == "Кроме своей команды" then
         return not (myTeam and p.Team == myTeam)
@@ -1836,11 +1862,31 @@ local function targetAllowed(p, mode, myTeam)
     return true
 end
 
--- Цикл: аим+автострельба, punch-аура, килл-аура, вечный спринт.
-local UIS2 = game:GetService("UserInputService")
+-- Ищем тул с нужным ремоутом/дочерним объектом: сначала экипированный.
+local function findToolWith(childName)
+    local chr = LP.Character
+    if chr then
+        for _, t in ipairs(chr:GetChildren()) do
+            if t:IsA("Tool") and t:FindFirstChild(childName) then
+                return t, true
+            end
+        end
+    end
+    local bp = LP:FindFirstChild("Backpack")
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t:FindFirstChild(childName) then
+                return t, false
+            end
+        end
+    end
+    return nil, false
+end
+
+-- Цикл: cuff-аура, punch-аура, килл-аура, вечный спринт.
 local auraAt = 0
-local aimAt = 0
 local punchAt = 0
+local cuffAt = 0
 local sprintAt = 0
 auraConn = RunService.Heartbeat:Connect(function()
     if STOPPED then return end
@@ -1857,63 +1903,41 @@ auraConn = RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- АИМ + АВТОСТРЕЛЬБА: камера на ближайшего врага, курсор в центр,
-    -- виртуальный ЛКМ — урон идёт по игре, обмануть невозможно.
-    if CFG.AimFire
-       and now - aimAt >= (tonumber(CFG.AimFireDelay) or 0.12) then
-        aimAt = now
-        local cam = workspace.CurrentCamera
-        local chr = LP.Character
-        local equipped = chr and chr:FindFirstChildOfClass("Tool")
-        local myRootA = chr and chr:FindFirstChild("HumanoidRootPart")
-        if cam and equipped and myRootA then
-            local vp = cam.ViewportSize
-            local cx2, cy2 = vp.X * 0.5, vp.Y * 0.5
-            local radius = tonumber(CFG.AimFireRadius) or 120
-            local mode = CFG.AimFireTeam or "Все"
-            local myTeam = LP.Team
-            local bestHead, bestScore
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LP then
-                    local ch2 = p.Character
-                    local hum2 = ch2 and ch2:FindFirstChildOfClass("Humanoid")
-                    local root2 = ch2 and ch2:FindFirstChild("HumanoidRootPart")
-                    local head2 = ch2 and ch2:FindFirstChild("Head")
-                    if ch2 and hum2 and hum2.Health > 0 and root2 and head2
-                       and (root2.Position - myRootA.Position).Magnitude <= radius
-                       and targetAllowed(p, mode, myTeam) then
-                        local sp = cam:WorldToViewportPoint(head2.Position)
-                        if sp.Z > 0 then
-                            local dx, dy = sp.X - cx2, sp.Y - cy2
-                            local score = dx * dx + dy * dy
-                            if not bestScore or score < bestScore then
-                                bestHead, bestScore = head2, score
+    -- CUFF-АУРА: сковывает наручниками ближайшего врага (Handcuffs
+    -- должны быть в руках/рюкзаке — выдаются за GUARD).
+    if CFG.CuffAura and now - cuffAt >= 0.6 then
+        cuffAt = now
+        local chrC = LP.Character
+        local humC = chrC and chrC:FindFirstChildOfClass("Humanoid")
+        local rootC = chrC and chrC:FindFirstChild("HumanoidRootPart")
+        if humC and rootC then
+            local tool, equipped2 = findToolWith("CuffEvent")
+            if tool then
+                if not equipped2 then
+                    pcall(function() humC:EquipTool(tool) end)
+                end
+                local bestP, bestD
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LP then
+                        local ch4 = p.Character
+                        local r4 = ch4 and ch4:FindFirstChild("HumanoidRootPart")
+                        if r4 and targetAllowed(p, CFG.CuffTeam or "Все", LP.Team) then
+                            local d = (r4.Position - rootC.Position).Magnitude
+                            if not bestD or d < bestD then
+                                bestP, bestD = p, d
                             end
                         end
                     end
                 end
-            end
-            if bestHead then
-                -- Не воевать с меню: курсор над GUI — не крутим камеру
-                -- и не кликаем (иначе меню «багается» и не нажимается).
-                local overUI = false
-                local mloc = UIS2:GetMouseLocation()
-                local pgM = LP:FindFirstChildOfClass("PlayerGui")
-                if pgM then
-                    pcall(function()
-                        for _, obj in ipairs(pgM:GetGuiObjectsAtPosition(mloc.X, mloc.Y)) do
-                            if obj:IsA("GuiButton") or obj.Active then
-                                overUI = true
-                                break
-                            end
+                if bestP and bestD and bestD <= 16 then
+                    local ev = tool:FindFirstChild("CuffEvent")
+                    if ev then
+                        pcall(function() ev:FireServer(bestP) end)
+                        local ch5 = bestP.Character
+                        if ch5 then
+                            pcall(function() ev:FireServer(ch5) end)
                         end
-                    end)
-                end
-                if not overUI then
-                    vMouseMove(cx2, cy2)
-                    cam.CFrame = CFrame.new(cam.CFrame.Position, bestHead.Position)
-                    task.wait()
-                    vClick(cx2, cy2)
+                    end
                 end
             end
         end
@@ -2060,7 +2084,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v1.7 (простое меню)"
+        title.Text = "PRISON ESP v1.8 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -2161,10 +2185,10 @@ local function buildFallbackGui()
         mkBtn("Ремоуты -> консоль", 22, function() G.PE.Remotes() end)
         mkToggle("Килл-аура", function() return CFG.KillAura == true end,
             function(v) CFG.KillAura = v end)
-        mkToggle("Аим + автострельба", function() return CFG.AimFire == true end,
-            function(v) CFG.AimFire = v end)
         mkToggle("Punch-аура", function() return CFG.PunchAura == true end,
             function(v) CFG.PunchAura = v end)
+        mkToggle("Cuff-аура (наручники)", function() return CFG.CuffAura == true end,
+            function(v) CFG.CuffAura = v end)
         mkToggle("Вечный спринт", function() return CFG.InfSprint == true end,
             function(v) CFG.InfSprint = v end)
         mkBtn("Выдать всё оружие", 22, function() G.PE.GiveAll() end)
@@ -2243,7 +2267,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v1.7",
+        LoadingSubtitle = "ESP + Бой v1.8",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2535,32 +2559,29 @@ local okGUI, errGUI = pcall(function()
         end,
     })
 
-    C:CreateSection("Аим + автострельба (честный выстрел)")
-    C:CreateParagraph({ Title = "Аим + автоогонь",
-        Content = "Крутит камеру на ближайшего врага, наводит курсор в центр экрана и жмёт ЛКМ виртуально — игра сама делает настоящий выстрел со своим уроном. Работает всегда, когда работает обычная стрельба. Требует ЭКИПИРОВАННУЮ пушку в руках." })
-    C:CreateToggle({ Name = "Аим + автострельба", Flag = "PE_AimFire",
-        CurrentValue = CFG.AimFire == true,
-        Callback = function(v) CFG.AimFire = v end })
-    C:CreateSlider({ Name = "Радиус цели", Flag = "PE_AimFireRadius",
-        Range = {20, 300}, Increment = 10,
-        CurrentValue = tonumber(CFG.AimFireRadius) or 120,
-        Suffix = " st", Callback = function(v) CFG.AimFireRadius = v end })
-    C:CreateSlider({ Name = "Задержка выстрелов", Flag = "PE_AimFireDelay",
-        Range = {5, 100}, Increment = 5,
-        CurrentValue = math.floor((tonumber(CFG.AimFireDelay) or 0.12) * 100 + 0.5),
-        Suffix = " x10мс", Callback = function(v) CFG.AimFireDelay = v / 100 end })
-    C:CreateDropdown({
-        Name = "Кого стрелять",
-        Flag = "PE_AimFireTeamPick",
-        Options = { "Все", "Кроме своей команды", "Только охрана" },
-        CurrentOption = { CFG.AimFireTeam },
-        MultipleOptions = false,
-        Callback = function(selected)
-            local picked = selected
-            if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then CFG.AimFireTeam = picked end
-        end,
+    C:CreateSection("Наручники и телепорт")
+    C:CreateParagraph({ Title = "Наручники и телепорт",
+        Content = "Комбо «того чела»: телепорт за спину жертве + мгновенные наручники через CuffEvent. Наручники (Handcuffs) есть только у GUARD — сначала нажми «Команда: GUARD», заспавнься, потом используй кнопки." })
+    C:CreateInput({
+        Name = "Ник жертвы (можно часть)",
+        PlaceholderText = "например: vasya",
+        RemoveTextAfterFocusLost = false,
+        Callback = function(txt) CFG._cuffName = txt end,
     })
+    C:CreateButton({ Name = "ТЕЛЕПОРТ к игроку (за спину)",
+        Callback = function() G.PE.TP(CFG._cuffName) end })
+    C:CreateButton({ Name = "НАРУЧНИКИ на игрока",
+        Callback = function() G.PE.Cuff(CFG._cuffName) end })
+    C:CreateButton({ Name = "ТЕЛЕПОРТ + НАРУЧНИКИ (комбо)",
+        Callback = function()
+            G.PE.TP(CFG._cuffName)
+            task.wait(0.15)
+            G.PE.Cuff(CFG._cuffName)
+        end })
+    C:CreateToggle({ Name = "Cuff-аура (сковывать ближайшего врага)",
+        Flag = "PE_CuffAura",
+        CurrentValue = CFG.CuffAura == true,
+        Callback = function(v) CFG.CuffAura = v end })
 
     C:CreateSection("Кулаки (Punch-аура)")
     C:CreateParagraph({ Title = "Punch-аура",
@@ -2806,16 +2827,16 @@ G.PE_Stop = function()
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     G.PE.Hit, G.PE.Ammo, G.PE.Team, G.PE.Diag = nil, nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
-    G.PE.GunSource = nil
+    G.PE.GunSource, G.PE.TP, G.PE.Cuff = nil, nil, nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v1.7 остановлен")
+    print("[PE] v1.8 остановлен")
 end
 
-print("[PE] v1.7 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v1.8 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
