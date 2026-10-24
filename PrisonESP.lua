@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.0
+--  PRISON ESP  v2.1
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -128,7 +128,9 @@ CFG.CuffTeam = pickOpt(CFG.CuffTeam, {
 -- PUNCH-АУРА: FistEvent("Punch") — сервер бьёт того, кто рядом.
 CFG.PunchAura = CFG.PunchAura == true
 CFG.PunchDelay = tonumber(CFG.PunchDelay) or 0.25
-CFG.PunchTele  = CFG.PunchTele == true
+-- Подлёт ВКЛ по умолчанию: сервер кулаков бьёт только вплотную,
+-- поэтому аура сама телепортируется к жертве и возвращается.
+CFG.PunchTele  = CFG.PunchTele ~= false
 CFG.PunchTeam  = pickOpt(CFG.PunchTeam, {
     "Все", "Кроме своей команды" }, "Кроме своей команды")
 
@@ -2057,15 +2059,17 @@ auraConn = RunService.Heartbeat:Connect(function()
                     end
                 end
                 if bestR and ev then
-                    if bestD <= 10 then
+                    if bestD <= 6 then
+                        -- Уже впритык — просто бьём.
                         pcall(function() ev:FireServer("Punch") end)
                     elseif CFG.PunchTele then
-                        -- Подлететь-ударить-вернуться.
+                        -- Дальний: телепорт ВПЛОТНУЮ (1.2 ст за спину)
+                        -- → удар → возврат на место.
                         local orig = rootP.CFrame
-                        rootP.CFrame = bestR.CFrame + Vector3.new(0, 0, 2.5)
-                        task.wait(0.1)
+                        rootP.CFrame = bestR.CFrame * CFrame.new(0, 0, 1.2)
+                        task.wait(0.08)
                         pcall(function() ev:FireServer("Punch") end)
-                        task.wait(0.1)
+                        task.wait(0.08)
                         local rootNow = LP.Character
                             and LP.Character:FindFirstChild("HumanoidRootPart")
                         if rootNow then
@@ -2150,7 +2154,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v2.0 (простое меню)"
+        title.Text = "PRISON ESP v2.1 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -2350,7 +2354,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.0",
+        LoadingSubtitle = "ESP + Бой v2.1",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2699,7 +2703,7 @@ local okGUI, errGUI = pcall(function()
 
     C:CreateSection("Кулаки (Punch-аура)")
     C:CreateParagraph({ Title = "Punch-аура",
-        Content = "Бьёт FistEvent(\"Punch\") — сервер наносит удар тому, кто стоит рядом. Кулаки из рюкзака экипируются автоматически. Дальних врагов можно бить с подлётом (телепорт → удар → возврат)." })
+        Content = "Бьёт FistEvent(\"Punch\") — сервер наносит удар только ВПЛОТНУЮ. Поэтому «Бить дальних» (вкл по умолчанию) сам телепортируется к жертве вплотную, бьёт и возвращает тебя на место — бить можно с любого расстояния. Кулаки экипируются автоматически." })
     C:CreateToggle({ Name = "Punch-аура", Flag = "PE_PunchAura",
         CurrentValue = CFG.PunchAura == true,
         Callback = function(v) CFG.PunchAura = v end })
@@ -2976,10 +2980,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v2.0 остановлен")
+    print("[PE] v2.1 остановлен")
 end
 
-print("[PE] v2.0 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.1 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
