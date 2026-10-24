@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v1.5
+--  PRISON ESP  v1.6
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1674,9 +1674,31 @@ G.PE.Give = function(itemName)
         if m:IsA("Model") and m.Name == itemName then
             local cd = m:FindFirstChildWhichIsA("ClickDetector", true)
             if cd then
+                -- Серверный "Item Give script" проверяет дистанцию до
+                -- модели (~200 st): подлетаем, кликаем и мгновенно
+                -- возвращаемся на место.
+                local chr = LP.Character
+                local root = chr and chr:FindFirstChild("HumanoidRootPart")
+                local part = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+                local origCF = root and root.CFrame
+                local teleported = false
+                if root and part and origCF
+                   and (part.Position - root.Position).Magnitude > 60 then
+                    root.CFrame = part.CFrame + Vector3.new(0, 4, 0)
+                    teleported = true
+                    task.wait(0.12)
+                end
                 local ok = pcall(fireclickdetector, cd)
-                print("[PE GIVE] " .. itemName .. ": fireclickdetector("
-                    .. tostring(cd:GetFullName()) .. ") -> " .. tostring(ok))
+                if teleported then
+                    task.wait(0.12)
+                    local root2 = LP.Character
+                        and LP.Character:FindFirstChild("HumanoidRootPart")
+                    if root2 then
+                        pcall(function() root2.CFrame = origCF end)
+                    end
+                end
+                print("[PE GIVE] " .. itemName .. ": fireclickdetector -> "
+                    .. tostring(ok) .. (teleported and " (с подлётом)" or ""))
                 return ok
             end
             warn("[PE GIVE] у '" .. itemName .. "' нет ClickDetector")
@@ -1691,6 +1713,7 @@ G.PE.GiveAll = function()
     local n = 0
     for _, nm in ipairs(GIVE_ITEMS) do
         if G.PE.Give(nm) then n = n + 1 end
+        task.wait(0.25)
     end
     print("[PE GIVE] выдано предметов: " .. n)
 end
@@ -1859,7 +1882,7 @@ local function buildFallbackGui()
         title.TextColor3 = Color3.new(1, 1, 1)
         title.Font = Enum.Font.GothamBold
         title.TextSize = 13
-        title.Text = "PRISON ESP v1.5 (простое меню)"
+        title.Text = "PRISON ESP v1.6 (простое меню)"
         title.Parent = frame
 
         local list = Instance.new("UIListLayout")
@@ -2038,7 +2061,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v1.5",
+        LoadingSubtitle = "ESP + Бой v1.6",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2566,10 +2589,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v1.5 остановлен")
+    print("[PE] v1.6 остановлен")
 end
 
-print("[PE] v1.5 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v1.6 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
