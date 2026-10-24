@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.8
+--  PRISON ESP  v2.9
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -2137,7 +2137,14 @@ auraConn = RunService.Heartbeat:Connect(function()
         and LP.Character:FindFirstChild("HumanoidRootPart")
     if not myRoot then return end
     local remote = myGunRemote("InflictTarget")
-    if not remote then return end   -- аура без пушки в руках не работает
+    if not remote then
+        -- Не молчим: «аура иногда не работает» = нет пушки.
+        if os.clock() - (CFG._noGunWarnAt or 0) > 10 then
+            CFG._noGunWarnAt = os.clock()
+            warn("[PE] килл-аура: нет пушки с InflictTarget — возьми оружие")
+        end
+        return
+    end
     local radius = tonumber(CFG.KillAuraRadius) or 40
     local mode = CFG.KillAuraTeam or "Все"
     local myTeam = LP.Team
@@ -2243,7 +2250,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.8",
+        LoadingSubtitle = "ESP + Бой v2.9",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2871,10 +2878,10 @@ G.PE_Stop = function()
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     G.PE_Stop = nil
     G.PE_LOADED_AT = nil
-    print("[PE] v2.8 остановлен")
+    print("[PE] v2.9 остановлен")
 end
 
-print("[PE] v2.8 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.9 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
