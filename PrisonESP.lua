@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.29
+--  PRISON ESP  v2.30
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -121,15 +121,11 @@ CFG.Items = CFG.Items ~= false
 CFG.KillAura       = CFG.KillAura == true
 CFG.KillAuraRadius = tonumber(CFG.KillAuraRadius) or 40
 CFG.KillAuraDelay  = tonumber(CFG.KillAuraDelay) or 0.15
-CFG.KillAuraTeam   = pickOpt(CFG.KillAuraTeam, {
-    "Everyone", "Except my team", "Only my team",
-    "Enemies (guards vs prisoners)", "Only guards", "Only prisoners",
-    "Selected player" }, "Everyone")
+CFG.KillAuraTeam   = pickOpt(CFG.KillAuraTeam, { "Everyone" }, "Everyone")
 -- НАРУЧНИКИ: CuffEvent сковывает игрока. Handcuffs выдаются за
 -- GUARD (команда переключается мгновенно кнопкой).
 CFG.CuffAura = CFG.CuffAura == true
-CFG.CuffTeam = pickOpt(CFG.CuffTeam, {
-    "Everyone", "Except my team" }, "Except my team")
+CFG.CuffTeam = pickOpt(CFG.CuffTeam, { "Everyone" }, "Everyone")
 -- АНТИ-СТАН: тазер/наручники/регдолл не должны останавливать.
 CFG.AntiStun = CFG.AntiStun ~= false
 -- Урон килл-ауры и бесконечные патроны. Подписура InflictTarget взята
@@ -171,10 +167,7 @@ CFG.GunScope = CFG.GunScope == true
 -- шлём напрямую и без него.
 CFG.TaserAura = CFG.TaserAura == true
 CFG.TaserDelay = tonumber(CFG.TaserDelay) or 0.7
-CFG.TaserTeam = pickOpt(CFG.TaserTeam, {
-    "Everyone", "Except my team",
-    "Enemies (guards vs prisoners)", "Only guards", "Only prisoners" },
-    "Except my team")
+CFG.TaserTeam = pickOpt(CFG.TaserTeam, { "Everyone" }, "Everyone")
 -- ОПАСНЫЕ ЗОНЫ: Death Part подсветка + телепорт к зоне побега.
 CFG.DangerESP = CFG.DangerESP == true
 -- АВТО-ПРОКАЧКА: новая пушка в руках (респавн/смена) — апгрейд
@@ -189,10 +182,7 @@ CFG.AdminESP = CFG.AdminESP ~= false
 CFG.SilentAim = CFG.SilentAim == true
 CFG.SilentFOV = tonumber(CFG.SilentFOV) or 180
 CFG.SilentRate = tonumber(CFG.SilentRate) or 0.12
-CFG.SilentTeam = pickOpt(CFG.SilentTeam, {
-    "Everyone", "Except my team", "Only my team",
-    "Enemies (guards vs prisoners)", "Only guards", "Only prisoners",
-    "Selected player" }, "Enemies (guards vs prisoners)")
+CFG.SilentTeam = pickOpt(CFG.SilentTeam, { "Everyone" }, "Everyone")
 -- БЕССМЕРТИЕ: цикл вампиризма БЕЗ жертвы — раз в 0.5с шлём
 -- InflictTarget по СЕБЕ: урон 0, вампиризм 1000000. Никого не
 -- задеваем, ни огня, ни пуль — сервер просто хилит нас.
@@ -206,11 +196,11 @@ CFG.ImmortalBurn = CFG.ImmortalBurn == true
 -- экране (FE-эпоха), горение — глобальное.
 CFG.C00lMode = CFG.C00lMode == true
 CFG.C00lDamage = tonumber(CFG.C00lDamage) or 3
-CFG.C00lTeam = pickOpt(CFG.C00lTeam, {
-    "Everyone", "Except my team", "Only my team",
-    "Enemies (guards vs prisoners)", "Only guards", "Only prisoners" },
-    "Everyone")
+CFG.C00lTeam = pickOpt(CFG.C00lTeam, { "Everyone" }, "Everyone")
 CFG.TexID = tostring(CFG.TexID or "")
+-- МГНОВЕННЫЙ РЕВАЙН: умер — сами шлём ResetToMenuEvent и возвращаемся
+-- в прошлую команду. Даунтайм ~1.5с вместо стандартного респавна.
+CFG.FastRespawn = CFG.FastRespawn == true
 
 local STOPPED = false
 local Rayfield
@@ -1325,6 +1315,31 @@ local paConn = Players.PlayerAdded:Connect(function(plr)
 end)
 local prConn = Players.PlayerRemoving:Connect(function(plr)
     removePlayer(plr)
+end)
+
+-- МГНОВЕННЫЙ РЕВАЙН: на смерть — сброс в меню и возврат в команду.
+local diedConn = LP.CharacterAdded:Connect(function(ch)
+    local humR = ch:WaitForChild("Humanoid", 10)
+    if humR then
+        humR.Died:Connect(function()
+            if STOPPED or not CFG.FastRespawn then return end
+            local team = LP.Team and LP.Team.Name
+            task.wait(0.3)
+            local r = ReplicatedStorage:FindFirstChild("ResetToMenuEvent")
+            if r then
+                pcall(function() r:FireServer() end)
+                print("[PE RESPAWN] instant rejoin (was " ..
+                    tostring(team) .. ")")
+            end
+            if team and team ~= "Undecided" then
+                task.wait(0.6)
+                local ct = ReplicatedStorage:FindFirstChild("ChooseTeamEvent")
+                if ct then
+                    pcall(function() ct:FireServer(team) end)
+                end
+            end
+        end)
+    end
 end)
 
 -- ============================================================
@@ -2451,24 +2466,10 @@ G.PE.GunSource = function()
     end
 end
 
-local function targetAllowed(p, mode, myTeam)
-    if mode == "Except my team" then
-        return not (myTeam and p.Team == myTeam)
-    elseif mode == "Only my team" then
-        return myTeam ~= nil and p.Team == myTeam
-    elseif mode == "Only guards" then
-        return (roleOf(p) == "guard")
-    elseif mode == "Only prisoners" then
-        return (roleOf(p) == "prisoner")
-    elseif mode == "Enemies (guards vs prisoners)" then
-        -- За охрану бьём не-охрану, не за охрану — бьём охрану.
-        local myRole = roleOf(LP)
-        if myRole == "guard" then
-            return roleOf(p) ~= "guard"
-        end
-        return (roleOf(p) == "guard")
-    end
-    return true
+-- Цель: «Everyone» или ник конкретного игрока (списки с игроками).
+local function targetAllowed(p, sel, myTeam)
+    if sel == nil or sel == "" or sel == "Everyone" then return true end
+    return p.Name == sel or p.DisplayName == sel
 end
 
 -- Цикл: cuff-аура, тазер-аура, анти-стан, килл-аура.
@@ -2515,17 +2516,12 @@ local function silentShot()
             if ch and hum and hum.Health > 0 and head
                and not ch:FindFirstChildOfClass("ForceField")
                and targetAllowed(p, CFG.SilentTeam or "Everyone", LP.Team) then
-                if CFG.SilentTeam == "Selected player"
-                   and p.Name ~= CFG._target then
-                    -- режим «выбранный игрок»: других не трогаем
-                else
-                    local sp = cam:WorldToViewportPoint(head.Position)
-                    if sp and sp.Z > 0 then
-                        local d = (Vector2.new(sp.X, sp.Y) - mpos).Magnitude
-                        if d <= (tonumber(CFG.SilentFOV) or 180)
-                           and (not bestD or d < bestD) then
-                            bestP, bestD = p, d
-                        end
+                local sp = cam:WorldToViewportPoint(head.Position)
+                if sp and sp.Z > 0 then
+                    local d = (Vector2.new(sp.X, sp.Y) - mpos).Magnitude
+                    if d <= (tonumber(CFG.SilentFOV) or 180)
+                       and (not bestD or d < bestD) then
+                        bestP, bestD = p, d
                     end
                 end
             end
@@ -2722,23 +2718,26 @@ local function auraTick()
         end
     end
 
-    -- БЕССМЕРТИЕ: вампиризм без жертвы — «выстрел» по самому себе,
-    -- урон 0, хил 1000000. Требует пушку с InflictTarget (как аура).
-    if CFG.Immortal and now - immortalAt >= 0.5 then
-        immortalAt = now
+    -- БЕССМЕРТИЕ: вампиризм без жертвы. Хилим РЕАКТИВНО — как только
+    -- HP упал (каждый кадр проверяем), плюс держим тонус раз в 0.15с.
+    -- Против ваншотов (100+ за один пакет) спасает только убийство
+    -- атакующего первым — выбери его ник в «Who to hit».
+    if CFG.Immortal then
         local chrI = LP.Character
         local humI = chrI and chrI:FindFirstChildOfClass("Humanoid")
         local rootI = chrI and chrI:FindFirstChild("HumanoidRootPart")
         local remoteI = myGunRemote("InflictTarget")
-        if remoteI and humI and rootI then
-            pcall(function()
-                remoteI:FireServer(humI, rootI, 0,
-                    Vector3.new(0, 0, 1), 0, 1000000,
-                    CFG.ImmortalBurn == true)
-            end)
-        elseif os.clock() - (CFG._noImmWarnAt or 0) > 10 then
-            CFG._noImmWarnAt = os.clock()
-            warn("[PE] immortal: no gun with InflictTarget - take a weapon")
+        if remoteI and humI and rootI and humI.Health > 0 then
+            local damaged = humI.Health < humI.MaxHealth - 0.5
+            if (damaged and now - immortalAt >= 0.05)
+               or ((not damaged) and now - immortalAt >= 0.15) then
+                immortalAt = now
+                pcall(function()
+                    remoteI:FireServer(humI, rootI, 0,
+                        Vector3.new(0, 0, 1), 0, 1000000,
+                        CFG.ImmortalBurn == true)
+                end)
+            end
         end
     end
 
@@ -2830,13 +2829,14 @@ local function auraTick()
                and not ch:FindFirstChildOfClass("ForceField") then
                 -- «Выбранный игрок»: бьём только цель из списка,
                 -- без ограничения дистанции.
-                local isSel = (mode == "Selected player"
-                    and p.Name == CFG._target)
+                -- Выбран конкретный игрок — бьём его без лимита
+                -- дистанции; «Everyone» — все в радиусе.
+                local isSel = (mode ~= "Everyone" and mode ~= ""
+                    and (p.Name == mode or p.DisplayName == mode))
                 local inRange = (root.Position - myRoot.Position).Magnitude
                     <= radius
                 local ok = isSel
-                    or (mode ~= "Selected player" and inRange
-                        and targetAllowed(p, mode, myTeam))
+                    or ((mode == "Everyone" or mode == "") and inRange)
                 if ok then
                     hits = hits + 1
                     -- Урон зажат на месте использования: сохранённые
@@ -2957,13 +2957,25 @@ end
 -- Дропдауны выбора цели регистрируются здесь при сборке меню,
 -- поэтому переменная объявлена ДО GUI-блока (v2.5 падала: #nil).
 local targetPickers = {}
+-- Списки выбора целей: игроки + «Everyone», обновляются раз в 5с.
+local teamPickers = {}
+local function teamOpts()
+    local o = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then o[#o + 1] = p.Name end
+    end
+    table.sort(o)
+    table.insert(o, 1, "Everyone")
+    if #o == 1 then o[1] = "Everyone" end
+    return o
+end
 local guiOK = false
 local okGUI, errGUI = pcall(function()
     local W = Rayfield:CreateWindow({
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.29",
+        LoadingSubtitle = "ESP + Combat v2.30",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3233,20 +3245,22 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = math.clamp(
             math.floor((tonumber(CFG.KillAuraDelay) or 0.15) * 100 + 0.5), 10, 100),
         Suffix = " x10ms", Callback = function(v) CFG.KillAuraDelay = v / 100 end })
-    C:CreateDropdown({
+    local hitDrop = C:CreateDropdown({
         Name = "Who to hit",
         Flag = "PE_KillAuraTeamPick",
-        Options = { "Everyone", "Except my team", "Only my team",
-            "Enemies (guards vs prisoners)", "Only guards", "Only prisoners",
-            "Selected player" },
+        Options = teamOpts(),
         CurrentOption = { CFG.KillAuraTeam },
         MultipleOptions = false,
         Callback = function(selected)
             local picked = selected
             if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then CFG.KillAuraTeam = picked end
+            if type(picked) == "string" then
+                CFG.KillAuraTeam = picked
+                print("[PE] kill aura target: " .. picked)
+            end
         end,
     })
+    teamPickers[#teamPickers + 1] = hitDrop
     C:CreateToggle({ Name = "Lifesteal (heal self per hit)",
         Flag = "PE_AuraLifesteal",
         CurrentValue = CFG.AuraLifesteal ~= false,
@@ -3267,12 +3281,6 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_ImmortalBurn",
         CurrentValue = CFG.ImmortalBurn == true,
         Callback = function(v) CFG.ImmortalBurn = v end })
-    C:CreateButton({ Name = "Aura: ONLY selected player",
-        Callback = function()
-            CFG.KillAuraTeam = "Selected player"
-            print("[PE] kill aura -> ONLY: "
-                .. tostring(CFG._target or "none (pick one in a list)"))
-        end })
 
     C:CreateSection("Cuffs & teleport")
     C:CreateParagraph({ Title = "Cuffs & teleport",
@@ -3313,18 +3321,22 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_CuffAura",
         CurrentValue = CFG.CuffAura == true,
         Callback = function(v) CFG.CuffAura = v end })
-    C:CreateDropdown({
+    local cuffTeamDrop = C:CreateDropdown({
         Name = "Who to cuff",
         Flag = "PE_CuffTeamPick",
-        Options = { "Everyone", "Except my team" },
+        Options = teamOpts(),
         CurrentOption = { CFG.CuffTeam },
         MultipleOptions = false,
         Callback = function(selected)
             local picked = selected
             if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then CFG.CuffTeam = picked end
+            if type(picked) == "string" then
+                CFG.CuffTeam = picked
+                print("[PE] cuff target: " .. picked)
+            end
         end,
     })
+    teamPickers[#teamPickers + 1] = cuffTeamDrop
 
     C:CreateSection("Gun upgrade")
     C:CreateParagraph({ Title = "Upgrade",
@@ -3386,32 +3398,6 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.ModGunAuto ~= false,
         Callback = function(v) CFG.ModGunAuto = v end })
 
-    C:CreateSection("Keybinds")
-    C:CreateKeybind({ Name = "Kill aura", Flag = "PE_KB_KillAura",
-        CurrentKeybind = "K",
-        HoldToInteract = false,
-        Callback = function(v)
-            CFG.KillAura = not CFG.KillAura
-            print("[PE] kill aura "
-                .. (CFG.KillAura and "ON" or "OFF") .. " (keybind)")
-        end })
-    C:CreateKeybind({ Name = "Taser aura", Flag = "PE_KB_TaserAura",
-        CurrentKeybind = "T",
-        HoldToInteract = false,
-        Callback = function(v)
-            CFG.TaserAura = not CFG.TaserAura
-            print("[PE] taser aura "
-                .. (CFG.TaserAura and "ON" or "OFF") .. " (keybind)")
-        end })
-    C:CreateKeybind({ Name = "Tase selected player", Flag = "PE_KB_Tase",
-        CurrentKeybind = "Y",
-        HoldToInteract = false,
-        Callback = function(v) G.PE.Tase(CFG._target) end })
-    C:CreateKeybind({ Name = "Fake shot at mouse", Flag = "PE_KB_Fake",
-        CurrentKeybind = "G",
-        HoldToInteract = false,
-        Callback = function(v) G.PE.FakeShot(nil) end })
-
     C:CreateSection("Taser (stun)")
     C:CreateParagraph({ Title = "Taser",
         Content = "The taser client sends RemoteEvent:FireServer(POSITION) - the server stuns whoever stands at that position, the 5s cooldown is client-only. Aura spams enemy positions around you (radius = kill aura radius). Needs the Taser tool: switch to GUARD first." })
@@ -3425,19 +3411,22 @@ local okGUI, errGUI = pcall(function()
             math.floor((tonumber(CFG.TaserDelay) or 0.7) * 100 + 0.5), 30, 200),
         Suffix = " x10ms",
         Callback = function(v) CFG.TaserDelay = v / 100 end })
-    C:CreateDropdown({
+    local taserTeamDrop = C:CreateDropdown({
         Name = "Who to tase",
         Flag = "PE_TaserTeamPick",
-        Options = { "Everyone", "Except my team",
-            "Enemies (guards vs prisoners)", "Only guards", "Only prisoners" },
+        Options = teamOpts(),
         CurrentOption = { CFG.TaserTeam },
         MultipleOptions = false,
         Callback = function(selected)
             local picked = selected
             if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then CFG.TaserTeam = picked end
+            if type(picked) == "string" then
+                CFG.TaserTeam = picked
+                print("[PE] taser target: " .. picked)
+            end
         end,
     })
+    teamPickers[#teamPickers + 1] = taserTeamDrop
     C:CreateButton({ Name = "TASE selected player (x3)",
         Callback = function() G.PE.Tase(CFG._target) end })
 
@@ -3452,20 +3441,22 @@ local okGUI, errGUI = pcall(function()
         Range = {1, 20}, Increment = 1,
         CurrentValue = math.clamp(tonumber(CFG.C00lDamage) or 3, 1, 20),
         Callback = function(v) CFG.C00lDamage = v end })
-    C:CreateDropdown({
+    local burnDrop = C:CreateDropdown({
         Name = "Who burns",
         Flag = "PE_C00lTeamPick",
-        Options = { "Everyone", "Except my team", "Only my team",
-            "Enemies (guards vs prisoners)", "Only guards",
-            "Only prisoners" },
+        Options = teamOpts(),
         CurrentOption = { CFG.C00lTeam },
         MultipleOptions = false,
         Callback = function(selected)
             local picked = selected
             if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then CFG.C00lTeam = picked end
+            if type(picked) == "string" then
+                CFG.C00lTeam = picked
+                print("[PE] burn target: " .. picked)
+            end
         end,
     })
+    teamPickers[#teamPickers + 1] = burnDrop
     C:CreateInput({ Name = "Decal image id (your photo)",
         PlaceholderText = "e.g. 123456789",
         CurrentValue = tostring(CFG.TexID or ""),
@@ -3499,20 +3490,22 @@ local okGUI, errGUI = pcall(function()
             math.floor((tonumber(CFG.SilentRate) or 0.12) * 100 + 0.5), 8, 30),
         Suffix = " x10ms",
         Callback = function(v) CFG.SilentRate = v / 100 end })
-    C:CreateDropdown({
+    local aimDrop = C:CreateDropdown({
         Name = "Who to aim at",
         Flag = "PE_SilentTeamPick",
-        Options = { "Everyone", "Except my team", "Only my team",
-            "Enemies (guards vs prisoners)", "Only guards", "Only prisoners",
-            "Selected player" },
+        Options = teamOpts(),
         CurrentOption = { CFG.SilentTeam },
         MultipleOptions = false,
         Callback = function(selected)
             local picked = selected
             if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then CFG.SilentTeam = picked end
+            if type(picked) == "string" then
+                CFG.SilentTeam = picked
+                print("[PE] aim target: " .. picked)
+            end
         end,
     })
+    teamPickers[#teamPickers + 1] = aimDrop
 
     C:CreateSection("Team & status")
     C:CreateButton({ Name = "Team: GUARD",
@@ -3523,6 +3516,10 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.Team("Escaped") end })
     C:CreateButton({ Name = "Reset to menu (escape cuffs)",
         Callback = function() G.PE.ResetMenu() end })
+    C:CreateToggle({ Name = "Fast respawn (instant rejoin)",
+        Flag = "PE_FastRespawn",
+        CurrentValue = CFG.FastRespawn == true,
+        Callback = function(v) CFG.FastRespawn = v end })
 
     C:CreateSection("Movement")
     C:CreateToggle({ Name = "Anti-stun (taser/cuffs/ragdoll)", Flag = "PE_AntiStun",
@@ -3738,6 +3735,10 @@ local function refreshTargetPickers()
         -- выбирает опцию). Раньше звали :Set — список не обновлялся.
         pcall(function() d:Refresh(opts) end)
     end
+    local topts = teamOpts()
+    for _, d in ipairs(teamPickers) do
+        pcall(function() d:Refresh(topts) end)
+    end
 end
 
 task.spawn(function()
@@ -3778,6 +3779,7 @@ G.PE_Stop = function()
     pcall(function() auraConn:Disconnect() end)
     pcall(function() paConn:Disconnect() end)
     pcall(function() prConn:Disconnect() end)
+    pcall(function() diedConn:Disconnect() end)
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
@@ -3794,10 +3796,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.29 stopped")
+    print("[PE] v2.30 stopped")
 end
 
-print("[PE] v2.29 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.30 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
