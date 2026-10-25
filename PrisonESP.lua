@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.10
+--  PRISON ESP  v2.11
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -18,6 +18,10 @@ local G = getgenv()
 if G.PE_LOADED_AT and (os.clock() - G.PE_LOADED_AT) < 5 then
     warn("[PE] только что запущен, подожди 5 сек")
     return
+end
+-- Повторный запуск: глушим прошлый экземпляр, иначе двойные ауры/плашки.
+if G.PE_Stop then
+    pcall(function() G.PE_Stop() end)
 end
 G.PE_LOADED_AT = os.clock()
 
@@ -143,6 +147,7 @@ CFG.AntiStun = CFG.AntiStun ~= false
 -- из декомпиляции GunScript_Local: (Humanoid, RootPart, урон,
 -- направление, отдача, вампиризм, поджог).
 CFG.KillAuraDamage = tonumber(CFG.KillAuraDamage) or 50
+CFG.ModGunDamage = tonumber(CFG.ModGunDamage) or 250
 
 local STOPPED = false
 local Rayfield
@@ -192,11 +197,8 @@ local function makeBillboard()
         return g
     end)
     if not ok or not gui then return nil end
-    local lbl = gui:FindFirstChild("Lbl")
-    if not lbl then
-        lbl = Instance.new("TextLabel")
-        lbl.Name = "Lbl"
-    end
+    local lbl = Instance.new("TextLabel")
+    lbl.Name = "Lbl"
     return gui, lbl
 end
 
@@ -967,7 +969,7 @@ function VIS.update(cam, myRoot)
                     screenOrigin(CFG.SnapFrom, cx, cy, vp),
                     Vector2.new(sp.X, sp.Y),
                     color,
-                    tonumber(CFG.SnapArrowThick) or 3,
+                    tonumber(CFG.SnapArrowThick) or 2,
                     math.clamp(tonumber(CFG.SnapAlpha) or 1, 0, 1))
             else
                 hideSnapArrow(p)
@@ -1004,8 +1006,11 @@ function VIS.update(cam, myRoot)
                 local margin = 34
                 local reach = math.min(cx, cy) - margin
                 if reach < 10 then reach = 10 end
-                local ax = math.clamp(cx + ux * reach, margin, vp.X - margin)
-                local ay = math.clamp(cy + uy * reach, margin, vp.Y - margin)
+                -- На крошечном вьюпорте max<min — clamp бы упал.
+                local maxX = math.max(margin, vp.X - margin)
+                local maxY = math.max(margin, vp.Y - margin)
+                local ax = math.clamp(cx + ux * reach, margin, maxX)
+                local ay = math.clamp(cy + uy * reach, margin, maxY)
                 drawEdgeArrow(p, Vector2.new(ax, ay), ux, uy, color, 3,
                     math.clamp(tonumber(CFG.SnapAlpha) or 1, 0, 1))
             else
@@ -1211,11 +1216,11 @@ local function addPlayer(plr)
     }
 end
 
-Players.PlayerAdded:Connect(function(plr)
+local paConn = Players.PlayerAdded:Connect(function(plr)
     if STOPPED then return end
     task.defer(function() addPlayer(plr) end)
 end)
-Players.PlayerRemoving:Connect(function(plr)
+local prConn = Players.PlayerRemoving:Connect(function(plr)
     removePlayer(plr)
 end)
 
@@ -1266,7 +1271,10 @@ mainConn = RunService.RenderStepped:Connect(function()
                     e.role = roleOf(plr)
                 end
 
-                if e.gui and e.gui.Parent and e.lbl then
+                if not (e.gui and e.gui.Parent and e.lbl) then
+                    -- Плашку уничтожили (респавн/чистка) — пересоздать.
+                    removePlayer(plr)
+                else
                     local role = e.role
                     local vis, color
                     if role == "guard" then
@@ -1366,7 +1374,7 @@ mainConn = RunService.RenderStepped:Connect(function()
                             if not e.box then e.box = makeBox() end
                             if e.box and root then
                                 e.box.color = color
-                                drawBox(e.box, root, cam)
+                                pcall(drawBox, e.box, root, cam)
                             end
                         elseif e.box then
                             hideBox(e.box)
@@ -1388,7 +1396,8 @@ mainConn = RunService.RenderStepped:Connect(function()
             warn("[PE VIS] ошибка кадра: " .. tostring(errV))
         end
     end)
-    if not ok then
+    if not ok and os.clock() - (CFG._frameErrAt or 0) > 5 then
+        CFG._frameErrAt = os.clock()
         warn("[PE] кадр ESP: " .. tostring(err))
     end
 end)
@@ -1655,8 +1664,10 @@ G.PE.Hit = function(namePart, partName)
     print("[PE HIT] " .. tool.Name .. ".InflictTarget -> " .. plr.Name
         .. " (точная подписура, урон " .. (tonumber(CFG.KillAuraDamage) or 50)
         .. "). СМОТРИ HP ЦЕЛИ!")
-    remote:FireServer(hum, root, tonumber(CFG.KillAuraDamage) or 50,
-        Vector3.new(0, 0, 1), 0, false, false)
+    pcall(function()
+        remote:FireServer(hum, root, tonumber(CFG.KillAuraDamage) or 50,
+            Vector3.new(0, 0, 1), 0, false, false)
+    end)
 end
 
 -- PE.Team("Guard") — проба смены команды.
@@ -1851,6 +1862,37 @@ G.PE.Cuff = function(namePart)
     print("[PE CUFF] CuffEvent -> " .. plr.Name .. " (4 варианта аргументов)")
 end
 
+-- ПРОКАЧКА ПУШКИ: Setting-модуль общий с GunScript_Local (require-кеш),
+-- правки видны игре сразу — «легитные» выстрелы бьют сильнее.
+G.PE.ModGun = function(dmg)
+    dmg = tonumber(dmg) or tonumber(CFG.ModGunDamage) or 250
+    local chr = LP.Character
+    local tool = chr and chr:FindFirstChildOfClass("Tool")
+    if not tool or not tool:FindFirstChild("Setting") then
+        print("[PE MOD] возьми пушку в РУКИ (Setting не найден)")
+        return
+    end
+    local ok, S = pcall(function() return require(tool.Setting) end)
+    if not ok or type(S) ~= "table" then
+        print("[PE MOD] Setting не читается: " .. tostring(S))
+        return
+    end
+    S.BaseDamage = dmg
+    S.HeadshotEnabled = true
+    S.HeadshotDamageMultiplier = 3
+    S.Auto = true
+    S.FireRate = 0.05
+    S.BurstRate = 0.05
+    S.ReloadTime = 0.5
+    S.Spread = 0
+    S.Piercing = 5
+    S.DelayBeforeFiring = 0
+    S.DelayAfterFiring = 0
+    S.CameraShakingEnabled = false
+    print("[PE MOD] " .. tool.Name .. " прокачана: урон " .. dmg
+        .. ", авто, без разброса, перезарядка 0.5с")
+end
+
 -- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
 -- с какими аргументами игра честно стреляет InflictTarget.
 G.PE.GunSource = function()
@@ -1913,8 +1955,7 @@ local auraAt = 0
 local punchAt = 0
 local cuffAt = 0
 local stunAt = 0
-auraConn = RunService.Heartbeat:Connect(function()
-    if STOPPED then return end
+local function auraTick()
     local now = os.clock()
 
     -- CUFF-АУРА: сковывает наручниками ближайшего врага (Handcuffs
@@ -1963,8 +2004,8 @@ auraConn = RunService.Heartbeat:Connect(function()
             and LP.Character:FindFirstChild("HumanoidRootPart")
         if rootH then
             pcall(function() rootH.CFrame = CFG._punchHome end)
+            CFG._punchHome = nil
         end
-        CFG._punchHome = nil
     end
 
     -- PUNCH-АУРА: FistEvent("Punch") — сервер сам бьёт того, кто
@@ -2039,24 +2080,27 @@ auraConn = RunService.Heartbeat:Connect(function()
                         and LP.Character:FindFirstChild("HumanoidRootPart")
                     if rootH2 then
                         pcall(function() rootH2.CFrame = CFG._punchHome end)
+                        CFG._punchHome = nil
                     end
-                    CFG._punchHome = nil
                 end
-                if bestR and ev then
+                if bestR and ev and not CFG._punchBusy then
                     if bestD <= 6 then
                         -- Уже впритык — просто бьём.
                         pcall(function() ev:FireServer("Punch") end)
-                    elseif CFG.PunchTele and CFG.PunchStay then
+                    elseif CFG.PunchStay then
                         -- РЕЖИМ «СТОЯТЬ У ЦЕЛИ»: телепорт один раз,
                         -- дальше бьём без возвратов (сервер всегда видит
                         -- нас рядом — попадания без промахов по таймингу).
                         if not CFG._punchHome then
                             CFG._punchHome = rootP.CFrame
                         end
+                        CFG._punchBusy = true
                         rootP.CFrame = bestR.CFrame * CFrame.new(0, 0, 1.2)
                         task.wait(0.05)
+                        CFG._punchBusy = false
                     elseif CFG.PunchTele then
                         -- Телепорт → удар → возврат.
+                        CFG._punchBusy = true
                         local orig = rootP.CFrame
                         rootP.CFrame = bestR.CFrame * CFrame.new(0, 0, 1.2)
                         task.wait(0.08)
@@ -2067,6 +2111,7 @@ auraConn = RunService.Heartbeat:Connect(function()
                         if rootNow then
                             pcall(function() rootNow.CFrame = orig end)
                         end
+                        CFG._punchBusy = false
                     end
                 end
             end
@@ -2182,6 +2227,15 @@ auraConn = RunService.Heartbeat:Connect(function()
             end
         end
     end
+end
+
+auraConn = RunService.Heartbeat:Connect(function()
+    if STOPPED then return end
+    local okA, errA = pcall(auraTick)
+    if not okA and os.clock() - (CFG._auraErrAt or 0) > 5 then
+        CFG._auraErrAt = os.clock()
+        warn("[PE] цикл аур: " .. tostring(errA))
+    end
 end)
 
 
@@ -2252,7 +2306,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.10",
+        LoadingSubtitle = "ESP + Бой v2.11",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2383,7 +2437,7 @@ local okGUI, errGUI = pcall(function()
         Range = {0, 40}, Increment = 1, CurrentValue = CFG.BoxPad or 4,
         Suffix = " px", Callback = function(v) CFG.BoxPad = v end })
     T:CreateSlider({ Name = "Отступ 3D-коробки (студов)", Flag = "PE_BoxMargin",
-        Range = {0, 5}, Increment = 0.1,
+        Range = {0, 10}, Increment = 0.1,
         CurrentValue = math.floor((tonumber(CFG.BoxMargin) or 0) * 10 + 0.5) / 10,
         Suffix = " st", Callback = function(v) CFG.BoxMargin = v end })
     T:CreateSlider({ Name = "Прозрачность коробки", Flag = "PE_BoxAlpha",
@@ -2539,12 +2593,13 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = tonumber(CFG.KillAuraRadius) or 40,
         Suffix = " st", Callback = function(v) CFG.KillAuraRadius = v end })
     C:CreateSlider({ Name = "Урон за выстрел", Flag = "PE_KillAuraDamage",
-        Range = {10, 500}, Increment = 10,
-        CurrentValue = tonumber(CFG.KillAuraDamage) or 50,
+        Range = {1, 10000}, Increment = 10,
+        CurrentValue = math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 10000),
         Callback = function(v) CFG.KillAuraDamage = v end })
     C:CreateSlider({ Name = "Задержка между тиками", Flag = "PE_KillAuraDelay",
         Range = {10, 100}, Increment = 5,
-        CurrentValue = math.floor((tonumber(CFG.KillAuraDelay) or 0.15) * 100 + 0.5),
+        CurrentValue = math.clamp(
+            math.floor((tonumber(CFG.KillAuraDelay) or 0.15) * 100 + 0.5), 10, 100),
         Suffix = " x10мс", Callback = function(v) CFG.KillAuraDelay = v / 100 end })
     C:CreateDropdown({
         Name = "Кого бить",
@@ -2597,6 +2652,28 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_CuffAura",
         CurrentValue = CFG.CuffAura == true,
         Callback = function(v) CFG.CuffAura = v end })
+    C:CreateDropdown({
+        Name = "Кого сковывать аурой",
+        Flag = "PE_CuffTeamPick",
+        Options = { "Все", "Кроме своей команды" },
+        CurrentOption = { CFG.CuffTeam },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG.CuffTeam = picked end
+        end,
+    })
+
+    C:CreateSection("Прокачка пушки")
+    C:CreateParagraph({ Title = "Прокачка",
+        Content = "Меняет Setting-модуль пушки в руках (require-кеш общий с GunScript_Local): урон, авто-режим, нулевой разброс, мгновенная перезарядка. Выстрелы выглядят легитимно, а бьют как прокачанные. Действует до смены оружия/респавна — жми снова." })
+    C:CreateSlider({ Name = "Урон прокачки", Flag = "PE_ModGunDamage",
+        Range = {10, 10000}, Increment = 10,
+        CurrentValue = math.clamp(tonumber(CFG.ModGunDamage) or 250, 10, 10000),
+        Callback = function(v) CFG.ModGunDamage = v end })
+    C:CreateButton({ Name = "ПРОКАЧАТЬ пушку в руках",
+        Callback = function() G.PE.ModGun() end })
 
     C:CreateSection("Кулаки (Punch-аура)")
     C:CreateParagraph({ Title = "Punch-аура",
@@ -2606,7 +2683,8 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.PunchAura = v end })
     C:CreateSlider({ Name = "Задержка ударов", Flag = "PE_PunchDelay",
         Range = {10, 100}, Increment = 5,
-        CurrentValue = math.floor((tonumber(CFG.PunchDelay) or 0.25) * 100 + 0.5),
+        CurrentValue = math.clamp(
+            math.floor((tonumber(CFG.PunchDelay) or 0.25) * 100 + 0.5), 10, 100),
         Suffix = " x10мс", Callback = function(v) CFG.PunchDelay = v / 100 end })
     C:CreateToggle({ Name = "Стоять у цели (макс. скорость)", Flag = "PE_PunchStay",
         CurrentValue = CFG.PunchStay ~= false,
@@ -2614,6 +2692,18 @@ local okGUI, errGUI = pcall(function()
     C:CreateToggle({ Name = "Бить дальних (подлёт+удар+возврат)", Flag = "PE_PunchTele",
         CurrentValue = CFG.PunchTele ~= false,
         Callback = function(v) CFG.PunchTele = v end })
+    C:CreateDropdown({
+        Name = "Кого бить кулаками",
+        Flag = "PE_PunchTeamPick",
+        Options = { "Все", "Кроме своей команды" },
+        CurrentOption = { CFG.PunchTeam },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG.PunchTeam = picked end
+        end,
+    })
 
     C:CreateSection("Команда и статус")
     C:CreateButton({ Name = "Команда: GUARD (охрана)",
@@ -2658,6 +2748,7 @@ end
 -- в контейнере (gethui/CoreGui), который рисуется, но НЕ принимает
 -- ввод. Переносим интерфейс в PlayerGui — там клики работают всегда.
 local function rescueRayfield()
+    if STOPPED then return end
     if not Rayfield then return end
     local pg = LP:FindFirstChildOfClass("PlayerGui")
     if not pg then return end
@@ -2871,19 +2962,32 @@ G.PE_Stop = function()
     end)
     pcall(function() clickConn:Disconnect() end)
     pcall(function() auraConn:Disconnect() end)
+    pcall(function() paConn:Disconnect() end)
+    pcall(function() prConn:Disconnect() end)
+    -- Возврат домой из punch-режима «стоять у цели».
+    if CFG._punchHome then
+        local rootH = LP.Character
+            and LP.Character:FindFirstChild("HumanoidRootPart")
+        if rootH then
+            pcall(function() rootH.CFrame = CFG._punchHome end)
+        end
+        CFG._punchHome = nil
+    end
+    CFG._punchBusy = false
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
-    G.PE.GunSource, G.PE.TP, G.PE.Cuff = nil, nil, nil
+    G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
-    G.PE_Stop = nil
+    -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
+    G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.10 остановлен")
+    print("[PE] v2.11 остановлен")
 end
 
-print("[PE] v2.10 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.11 запущен | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
     .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
