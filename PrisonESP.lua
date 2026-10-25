@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.31
+--  PRISON ESP  v2.32
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -198,6 +198,12 @@ CFG.TexID = tostring(CFG.TexID or "")
 -- МГНОВЕННЫЙ РЕВАЙН: умер — сами шлём ResetToMenuEvent и возвращаемся
 -- в прошлую команду. Даунтайм ~1.5с вместо стандартного респавна.
 CFG.FastRespawn = CFG.FastRespawn == true
+-- АВТО-ГИВЕР: после смерти сам выдаёт выбранное оружие (если сервер
+-- ничего не выдал).
+CFG.AutoGive = CFG.AutoGive == true
+CFG.AutoGiveName = pickOpt(CFG.AutoGiveName, {
+    "M9", "AK-74", "M16a4 MOD", "MP5 Short", "SVD", "PPSH-41",
+    "MG42", "Kord", "Hammer", "KeyCard", "GIVE ALL" }, "M9")
 
 local STOPPED = false
 local Rayfield
@@ -1312,6 +1318,24 @@ local paConn = Players.PlayerAdded:Connect(function(plr)
 end)
 local prConn = Players.PlayerRemoving:Connect(function(plr)
     removePlayer(plr)
+end)
+
+-- АВТО-ГИВЕР: после респавна сам выдаём выбранное оружие (если сервер
+-- не выдал ничего сам).
+local giveConn = LP.CharacterAdded:Connect(function()
+    if STOPPED or not CFG.AutoGive then return end
+    task.wait(1.5)
+    if STOPPED or not CFG.AutoGive then return end
+    local chr = LP.Character
+    if not chr then return end
+    if chr:FindFirstChildOfClass("Tool") then return end
+    if CFG.AutoGiveName == "GIVE ALL" then
+        G.PE.GiveAll()
+    else
+        G.PE.Give(CFG.AutoGiveName)
+    end
+    print("[PE GIVE] auto-gave " .. tostring(CFG.AutoGiveName)
+        .. " after respawn")
 end)
 
 -- МГНОВЕННЫЙ РЕВАЙН: на смерть — сброс в меню и возврат в команду.
@@ -3000,7 +3024,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.31",
+        LoadingSubtitle = "ESP + Combat v2.32",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3488,12 +3512,6 @@ local okGUI, errGUI = pcall(function()
     C:CreateButton({ Name = "RESTORE textures",
         Callback = function() G.PE.TexRestore() end })
 
-    C:CreateSection("Fake shots (visual only)")
-    C:CreateParagraph({ Title = "Fake shots",
-        Content = "Sends a bullet tracer through the server's VisualizeBullet relay - everyone sees you shooting, zero damage. Button aims at the selected player, the G keybind fires at your mouse cursor. Needs a gun in hands." })
-    C:CreateButton({ Name = "FAKE SHOT at selected player",
-        Callback = function() G.PE.FakeShot(CFG._target) end })
-
     C:CreateSection("Client aim (silent)")
     C:CreateParagraph({ Title = "Silent aim",
         Content = "Hold LMB with a gun: every shot is re-sent straight into the head of the target nearest to your crosshair - no raycast at all, so it hits through walls. Damage comes from the equipped gun's Setting (upgraded gun = upgraded damage). A real tracer flies into the victim so everyone sees a legit hit. FOV = max distance from crosshair in pixels." })
@@ -3550,6 +3568,23 @@ local okGUI, errGUI = pcall(function()
     C:CreateSection("Weapon giver (click detectors)")
     C:CreateParagraph({ Title = "Giver",
         Content = "Gives weapons/keycard via fireclickdetector on ground models. Distance is not checked. If a gun is NOT given - its server script likely requires GUARD team: press 'Team: GUARD' first, then give. Take the weapon from your backpack afterwards." })
+    C:CreateToggle({ Name = "Auto-give after death",
+        Flag = "PE_AutoGive",
+        CurrentValue = CFG.AutoGive == true,
+        Callback = function(v) CFG.AutoGive = v end })
+    C:CreateDropdown({
+        Name = "Auto-give weapon",
+        Flag = "PE_AutoGivePick",
+        Options = { "M9", "AK-74", "M16a4 MOD", "MP5 Short", "SVD",
+            "PPSH-41", "MG42", "Kord", "Hammer", "KeyCard", "GIVE ALL" },
+        CurrentOption = { CFG.AutoGiveName },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG.AutoGiveName = picked end
+        end,
+    })
     C:CreateButton({ Name = "GIVE ALL (guns + KeyCard)",
         Callback = function() G.PE.GiveAll() end })
     for _, nm in ipairs(GIVE_ITEMS) do
@@ -3801,6 +3836,7 @@ G.PE_Stop = function()
     pcall(function() paConn:Disconnect() end)
     pcall(function() prConn:Disconnect() end)
     pcall(function() diedConn:Disconnect() end)
+    pcall(function() giveConn:Disconnect() end)
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
@@ -3818,10 +3854,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.31 stopped")
+    print("[PE] v2.32 stopped")
 end
 
-print("[PE] v2.31 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.32 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
