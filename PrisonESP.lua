@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.23
+--  PRISON ESP  v2.24
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -174,6 +174,17 @@ CFG.DangerESP = CFG.DangerESP == true
 CFG.ModGunAuto = CFG.ModGunAuto ~= false
 -- АДМИНЫ: подсветка магентой + [ADMIN] + алерт в консоль при входе.
 CFG.AdminESP = CFG.AdminESP ~= false
+-- КЛИЕНТСКИЙ АИМ: пока зажата ЛКМ с пушкой — каждый «выстрел» сам
+-- уходит InflictTarget'ом в цель у прицела. Рейкаста нет => стены
+-- не существуют. Урон берём из Setting экипированной пушки
+-- (прокачанной — прокачанный).
+CFG.SilentAim = CFG.SilentAim == true
+CFG.SilentFOV = tonumber(CFG.SilentFOV) or 180
+CFG.SilentRate = tonumber(CFG.SilentRate) or 0.12
+CFG.SilentTeam = pickOpt(CFG.SilentTeam, {
+    "Everyone", "Except my team", "Only my team",
+    "Enemies (guards vs prisoners)", "Only guards", "Only prisoners",
+    "Selected player" }, "Enemies (guards vs prisoners)")
 
 local STOPPED = false
 local Rayfield
@@ -2318,8 +2329,112 @@ local cuffAt = 0
 local taserAt = 0
 local stunAt = 0
 local modAt = 0
+local silentAt = 0
+
+-- Зажатие ЛКМ для клиентского аима.
+local PE_MOUSE_DOWN = false
+local mouseConn1 = LP:GetMouse().Button1Down:Connect(function()
+    PE_MOUSE_DOWN = true
+end)
+local mouseConn2 = LP:GetMouse().Button1Up:Connect(function()
+    PE_MOUSE_DOWN = false
+end)
+
+-- КЛИЕНТСКИЙ АИМ: один «выстрел» = InflictTarget точно в цель у
+-- прицела (голова), без рейкаста — сквозь стены. Плюс честный
+-- трассер VisualizeBullet, прилетающий в жертву: для всех это
+-- выглядит как попадание.
+local function silentShot()
+    local chr = LP.Character
+    local tool = chr and chr:FindFirstChildOfClass("Tool")
+    if not tool then return end
+    local gsv = tool:FindFirstChild("GunScript_Server")
+    local remote = gsv and gsv:FindFirstChild("InflictTarget")
+    if not remote then return end
+    local cam = workspace.CurrentCamera
+    local mouse = LP:GetMouse()
+    if not cam or not mouse then return end
+    local mpos = Vector2.new(mouse.X, mouse.Y)
+    local bestP, bestD = nil, nil
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            local ch = p.Character
+            local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+            local head = ch and (ch:FindFirstChild("Head")
+                or ch:FindFirstChild("HumanoidRootPart"))
+            if ch and hum and hum.Health > 0 and head
+               and not ch:FindFirstChildOfClass("ForceField")
+               and targetAllowed(p, CFG.SilentTeam or "Everyone", LP.Team) then
+                if CFG.SilentTeam == "Selected player"
+                   and p.Name ~= CFG._target then
+                    -- режим «выбранный игрок»: других не трогаем
+                else
+                    local sp = cam:WorldToViewportPoint(head.Position)
+                    if sp and sp.Z > 0 then
+                        local d = (Vector2.new(sp.X, sp.Y) - mpos).Magnitude
+                        if d <= (tonumber(CFG.SilentFOV) or 180)
+                           and (not bestD or d < bestD) then
+                            bestP, bestD = p, d
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if not bestP then return end
+    local ch = bestP.Character
+    local hum = ch:FindFirstChildOfClass("Humanoid")
+    local head = ch:FindFirstChild("Head")
+        or ch:FindFirstChild("HumanoidRootPart")
+    local myRoot = chr:FindFirstChild("HumanoidRootPart")
+    -- Урон — из Setting экипированной пушки (после ModGun — прокачанный).
+    local dmg = math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 5000)
+    if tool:FindFirstChild("Setting") then
+        pcall(function()
+            local S = require(tool.Setting)
+            if tonumber(S.BaseDamage) then
+                dmg = math.clamp(tonumber(S.BaseDamage), 1, 5000)
+            end
+        end)
+    end
+    local dir = Vector3.new(0, 0, 1)
+    if myRoot then
+        local delta = head.Position - myRoot.Position
+        if delta.Magnitude > 0.01 then dir = delta.Unit end
+    end
+    local heal = CFG.AuraLifesteal ~= false and 1000000 or 0
+    pcall(function()
+        remote:FireServer(hum, head, dmg, dir, 0, heal, false)
+    end)
+    -- Трассер «пуля прилетела в жертву» — его видят все игроки.
+    local vb = tool:FindFirstChild("VisualizeBullet")
+    local gsl = tool:FindFirstChild("GunScript_Local")
+    local handle = tool:FindFirstChild("Handle")
+    if vb and gsl and handle then
+        pcall(function()
+            vb:FireServer(handle, Vector3.new(0, 0.625, 1.25),
+                head.Position,
+                gsl:FindFirstChild("MuzzleEffect"),
+                gsl:FindFirstChild("HitEffect"),
+                186809061,
+                { false, 8, 0 },
+                { 25, Vector3.new(0.25, 0.25, 100),
+                    BrickColor.new("Bright yellow").Color, 0.25,
+                    Enum.Material.SmoothPlastic, 0.25 },
+                true, false)
+        end)
+    end
+end
 local function auraTick()
     local now = os.clock()
+
+    -- КЛИЕНТСКИЙ АИМ: зажата ЛКМ с пушкой — «выстрелы» уходят точно
+    -- в цель у прицела (сквозь стены), с трассером.
+    if CFG.SilentAim and PE_MOUSE_DOWN and now - silentAt
+        >= math.max(0.08, tonumber(CFG.SilentRate) or 0.12) then
+        silentAt = now
+        pcall(silentShot)
+    end
 
     -- АВТО-ПРОКАЧКА: пушка без метки в руках — апгрейдим сразу.
     if CFG.ModGunAuto ~= false and now - modAt >= 1 then
@@ -2634,7 +2749,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.23",
+        LoadingSubtitle = "ESP + Combat v2.24",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3102,6 +3217,38 @@ local okGUI, errGUI = pcall(function()
     C:CreateButton({ Name = "FAKE SHOT at selected player",
         Callback = function() G.PE.FakeShot(CFG._target) end })
 
+    C:CreateSection("Client aim (silent)")
+    C:CreateParagraph({ Title = "Silent aim",
+        Content = "Hold LMB with a gun: every shot is re-sent straight into the head of the target nearest to your crosshair - no raycast at all, so it hits through walls. Damage comes from the equipped gun's Setting (upgraded gun = upgraded damage). A real tracer flies into the victim so everyone sees a legit hit. FOV = max distance from crosshair in pixels." })
+    C:CreateToggle({ Name = "Silent aim (crosshair target, walls)",
+        Flag = "PE_SilentAim",
+        CurrentValue = CFG.SilentAim == true,
+        Callback = function(v) CFG.SilentAim = v end })
+    C:CreateSlider({ Name = "Aim FOV radius (px)", Flag = "PE_SilentFOV",
+        Range = {30, 600}, Increment = 10,
+        CurrentValue = math.clamp(tonumber(CFG.SilentFOV) or 180, 30, 600),
+        Callback = function(v) CFG.SilentFOV = v end })
+    C:CreateSlider({ Name = "Aim shot rate", Flag = "PE_SilentRate",
+        Range = {8, 30}, Increment = 1,
+        CurrentValue = math.clamp(
+            math.floor((tonumber(CFG.SilentRate) or 0.12) * 100 + 0.5), 8, 30),
+        Suffix = " x10ms",
+        Callback = function(v) CFG.SilentRate = v / 100 end })
+    C:CreateDropdown({
+        Name = "Who to aim at",
+        Flag = "PE_SilentTeamPick",
+        Options = { "Everyone", "Except my team", "Only my team",
+            "Enemies (guards vs prisoners)", "Only guards", "Only prisoners",
+            "Selected player" },
+        CurrentOption = { CFG.SilentTeam },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG.SilentTeam = picked end
+        end,
+    })
+
     C:CreateSection("Team & status")
     C:CreateButton({ Name = "Team: GUARD",
         Callback = function() G.PE.Team("Guard") end })
@@ -3361,6 +3508,8 @@ G.PE_Stop = function()
         Screen = nil
     end)
     pcall(function() clickConn:Disconnect() end)
+    pcall(function() mouseConn1:Disconnect() end)
+    pcall(function() mouseConn2:Disconnect() end)
     pcall(function() auraConn:Disconnect() end)
     pcall(function() paConn:Disconnect() end)
     pcall(function() prConn:Disconnect() end)
@@ -3378,10 +3527,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.23 stopped")
+    print("[PE] v2.24 stopped")
 end
 
-print("[PE] v2.23 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.24 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
