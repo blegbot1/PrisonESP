@@ -1783,10 +1783,12 @@ local byChams = setmetatable({}, { __mode = "k" })
 local chamsConn = RunService.Heartbeat:Connect(function()
     if STOPPED then return end
     if not CFG.Chams then
-        for _, h in pairs(byChams) do
-            pcall(function() h:Destroy() end)
+        if next(byChams) then
+            for _, h in pairs(byChams) do
+                pcall(function() h:Destroy() end)
+            end
+            byChams = setmetatable({}, { __mode = "k" })
         end
-        byChams = setmetatable({}, { __mode = "k" })
         return
     end
     local nowC = os.clock()
@@ -2835,8 +2837,13 @@ local function auraTick()
                 end)
             end
             -- Оружие: после респавна выпало — берём заново (первая
-            -- выдача сразу, без 8-секундной отсрочки).
-            local hasGun = myGunRemote("InflictTarget") ~= nil
+            -- выдача сразу, без 8-секундной отсрочки). Проверка пушки
+            -- кэшируется на 0.5с: myGunRemote каждый кадр дорог.
+            if not CFG._apocGunAt or now - CFG._apocGunAt >= 0.5 then
+                CFG._apocGunAt = now
+                CFG._apocHasGun = myGunRemote("InflictTarget") ~= nil
+            end
+            local hasGun = CFG._apocHasGun
             if not hasGun then
                 if not CFG._apocGiveAt
                    or os.clock() - CFG._apocGiveAt > 8 then
@@ -3852,7 +3859,15 @@ local okGUI, errGUI = pcall(function()
     C:CreateToggle({ Name = "APOCALYPSE (auto killer machine)",
         Flag = "PE_Apocalypse",
         CurrentValue = CFG.Apocalypse == true,
-        Callback = function(v) CFG.Apocalypse = v end })
+        Callback = function(v)
+            CFG.Apocalypse = v
+            -- Взаимоисключение с килл-аурой: вместе они давят 280+
+            -- FireServer/с — сеть начинает терять пакеты.
+            if v and CFG.KillAura then
+                CFG.KillAura = false
+                print("[PE APOC] kill aura auto-disabled (mutual excl.)")
+            end
+        end })
     C:CreateSlider({ Name = "Apocalypse damage", Flag = "PE_ApocDamage",
         Range = {1, 200}, Increment = 5,
         CurrentValue = math.clamp(tonumber(CFG.ApocDamage) or 100, 1, 200),
@@ -3903,7 +3918,16 @@ local okGUI, errGUI = pcall(function()
     C:CreateToggle({ Name = "Fly (WASD + Space/Ctrl)",
         Flag = "PE_Fly",
         CurrentValue = CFG.Fly == true,
-        Callback = function(v) CFG.Fly = v end })
+        Callback = function(v)
+            CFG.Fly = v
+            if not v then
+                pcall(function()
+                    local r = LP.Character
+                        and LP.Character:FindFirstChild("HumanoidRootPart")
+                    if r then r.AssemblyLinearVelocity = Vector3.zero end
+                end)
+            end
+        end })
     C:CreateSlider({ Name = "Fly speed", Flag = "PE_FlySpeed",
         Range = {10, 300}, Increment = 10,
         CurrentValue = math.clamp(tonumber(CFG.FlySpeed) or 60, 10, 300),
