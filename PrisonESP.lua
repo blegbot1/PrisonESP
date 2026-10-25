@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.37
+--  PRISON ESP  v2.38
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -186,6 +186,13 @@ CFG.AutoGiveName = pickOpt(CFG.AutoGiveName, {
 -- РЕТРИБУЦИЯ: получили урон — мгновенно находим атакующего
 -- (вооружённые в приоритете) и сжигаем его.
 CFG.Retr = CFG.Retr ~= false
+-- ОХОТА НА ЧИТЕРОВ: следим за перемещениями всех игроков;
+-- устойчивая горизонтальная сверхскорость (100+ стадов/с, 3 срыва
+-- подряд) = метка [CHEATER] в ESP. Автосожжение — ОТДЕЛЬНЫЙ тоггл,
+-- выключен по умолчанию (ложные срабатывания не должны жечь людей).
+CFG.Hunter = CFG.Hunter ~= false
+CFG.HunterSpeed = tonumber(CFG.HunterSpeed) or 100
+CFG.HunterBurn = CFG.HunterBurn == true
 
 local STOPPED = false
 local Rayfield
@@ -1244,6 +1251,9 @@ G.PE.TeamOf = function(p) return roleOf(p) end
 -- не копятся, при выходе чистим руками для мгновенности.
 local PE_BURN_AT = setmetatable({}, { __mode = "k" })
 local PE_FLING_AT = setmetatable({}, { __mode = "k" })
+-- Охота на читеров: меченые + трекер скоростей.
+local PE_CHEATERS = setmetatable({}, { __mode = "k" })
+local PE_SPEED_TRACK = setmetatable({}, { __mode = "k" })
 
 local function removePlayer(plr)
     local e = by[plr]
@@ -1253,6 +1263,8 @@ local function removePlayer(plr)
     by[plr] = nil
     PE_BURN_AT[plr] = nil
     PE_FLING_AT[plr] = nil
+    PE_CHEATERS[plr] = nil
+    PE_SPEED_TRACK[plr] = nil
 end
 
 local function addPlayer(plr)
@@ -1390,6 +1402,7 @@ mainConn = RunService.RenderStepped:Connect(function()
                     e.roleAt = nowT
                     e.role = roleOf(plr)
                     e.admin = isAdminP(plr)
+                    e.cheater = PE_CHEATERS[plr] == true
                     if e.admin and not e.adminWarned then
                         e.adminWarned = true
                         warn("[PE] ADMIN ON SERVER: " .. plr.Name
@@ -1407,6 +1420,10 @@ mainConn = RunService.RenderStepped:Connect(function()
                         -- Админ: всегда заметен, магента поверх роли.
                         vis = CFG.AdminESP ~= false
                         color = Color3.fromRGB(255, 0, 255)
+                    elseif e.cheater then
+                        -- Читер по скорости: жёлтый тревожный.
+                        vis = CFG.PlayerESP ~= false
+                        color = Color3.fromRGB(255, 230, 0)
                     elseif role == "guard" then
                         vis = CFG.GuardESP ~= false
                         color = safeColor(CFG.ColGuard, Color3.new(0.3, 0.7, 1))
@@ -1457,6 +1474,9 @@ mainConn = RunService.RenderStepped:Connect(function()
                             local parts = {}
                             if e.admin then
                                 parts[#parts + 1] = "[ADMIN]"
+                            end
+                            if e.cheater then
+                                parts[#parts + 1] = "[CHEATER]"
                             end
                             if CFG.RoleTags then
                                 local tag = ROLE_TAG[role]
@@ -2362,6 +2382,8 @@ local modAt = 0
 local immortalAt = 0
 local c00lAt = 0
 local retAt = 0
+local hunterAt = 0
+local hBurnAt = 0
 local PE_LAST_HP = -1
 local PE_HIT_AT = 0
 local retTarget, retUntil = nil, 0
@@ -2448,6 +2470,74 @@ local function auraTick()
         if toolM and toolM:FindFirstChild("Setting")
            and not toolM:GetAttribute("PE_Marked") then
             G.PE.ModGun()
+        end
+    end
+
+    -- ОХОТА НА ЧИТЕРОВ (пороги из декомпила: спринт ~24-32 ст/с):
+    -- треким ГОРИЗОНТАЛЬНУЮ скорость; подброшенных флингом (вертикаль)
+    -- и скользящих от отброса (Air+Freefall) не считаем; сидящих —
+    -- тоже. Устойчивое превышение = метка [CHEATER] в ESP.
+    if CFG.Hunter and now - hunterAt >= 0.4 then
+        hunterAt = now
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP then
+                local chH = p.Character
+                local humH = chH and chH:FindFirstChildOfClass("Humanoid")
+                local rootH = chH and chH:FindFirstChild("HumanoidRootPart")
+                if chH and humH and humH.Health > 0 and rootH then
+                    local airborne = false
+                    pcall(function()
+                        local fm = humH.FloorMaterial
+                        airborne = (typeof(fm) == "EnumItem"
+                            and fm.Name == "Air"
+                            and humH:GetState()
+                                == Enum.HumanoidStateType.Freefall)
+                    end)
+                    if humH.SeatPart or airborne then
+                        PE_SPEED_TRACK[p] = 0
+                    else
+                        local v = rootH.AssemblyLinearVelocity
+                        local flat = Vector2.new(v.X, v.Z).Magnitude
+                        -- 60+ держится 1.2с (3 пробы) или 120+ разово.
+                        if flat > 120
+                           or (flat > (tonumber(CFG.HunterSpeed) or 60)) then
+                            local n = (PE_SPEED_TRACK[p] or 0) + 1
+                            PE_SPEED_TRACK[p] = n
+                            if (n >= 3 or flat > 120)
+                               and not PE_CHEATERS[p] then
+                                PE_CHEATERS[p] = true
+                                warn("[PE HUNTER] CHEATER: " .. p.Name
+                                    .. " (speed " .. math.floor(flat) .. ")")
+                            end
+                        else
+                            PE_SPEED_TRACK[p] = 0
+                        end
+                    end
+                end
+            end
+        end
+    end
+    -- Автосожжение меченых (отдельный тумблер, по умолчанию выкл).
+    if CFG.Hunter and CFG.HunterBurn and now - hBurnAt >= 0.25 then
+        hBurnAt = now
+        local remoteH = myGunRemote("InflictTarget")
+        if remoteH then
+            for p in pairs(PE_CHEATERS) do
+                local chH = p.Character
+                local humH = chH and chH:FindFirstChildOfClass("Humanoid")
+                local headH = chH and (chH:FindFirstChild("Head")
+                    or chH:FindFirstChild("HumanoidRootPart"))
+                if chH and humH and humH.Health > 0 and headH then
+                    local bt = PE_BURN_AT[p]
+                    local burnH = (not bt or now - bt > 1.5)
+                    if burnH then PE_BURN_AT[p] = now end
+                    pcall(function()
+                        remoteH:FireServer(humH, headH,
+                            math.clamp(tonumber(CFG.KillAuraDamage) or 50,
+                                1, 5000), Vector3.new(0, 1, 0), 0, 0, burnH)
+                    end)
+                end
+            end
         end
     end
 
@@ -2754,7 +2844,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.37",
+        LoadingSubtitle = "ESP + Combat v2.38",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3209,6 +3299,23 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.Immortal == true,
         Callback = function(v) CFG.Immortal = v end })
 
+    C:CreateSection("Cheater hunter")
+    C:CreateParagraph({ Title = "Hunter",
+        Content = "Watches everyone's horizontal speed (thresholds from the decompiled kit: sprint is 24-32). Fling victims, knockback slides, seats and freefall are excluded. Sustained over-speed = [CHEATER] tag in ESP (yellow). Optional auto-burn punishes marked cheaters - OFF by default to protect innocents from false positives." })
+    C:CreateToggle({ Name = "Cheater hunter (detect + tag)",
+        Flag = "PE_Hunter",
+        CurrentValue = CFG.Hunter ~= false,
+        Callback = function(v) CFG.Hunter = v end })
+    C:CreateSlider({ Name = "Hunter speed threshold", Flag = "PE_HunterSpeed",
+        Range = {40, 200}, Increment = 5,
+        CurrentValue = math.clamp(tonumber(CFG.HunterSpeed) or 60, 40, 200),
+        Suffix = " st/s",
+        Callback = function(v) CFG.HunterSpeed = v end })
+    C:CreateToggle({ Name = "AUTO-BURN marked cheaters",
+        Flag = "PE_HunterBurn",
+        CurrentValue = CFG.HunterBurn == true,
+        Callback = function(v) CFG.HunterBurn = v end })
+
     C:CreateSection("Gun upgrade")
     C:CreateParagraph({ Title = "Upgrade",
         Content = "Edits the Setting module of the gun in hands (require cache shared with GunScript_Local): damage, auto mode, zero spread, instant reload. Shots look legit but hit upgraded. Resets on weapon change/respawn - press again." })
@@ -3658,10 +3765,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.37 stopped")
+    print("[PE] v2.38 stopped")
 end
 
-print("[PE] v2.37 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.38 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
