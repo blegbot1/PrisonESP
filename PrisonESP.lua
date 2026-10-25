@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.35
+--  PRISON ESP  v2.36
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -207,10 +207,14 @@ CFG.AutoGiveName = pickOpt(CFG.AutoGiveName, {
 -- РЕТРИБУЦИЯ: получили урон — мгновенно находим атакующего
 -- (вооружённые в приоритете) и сжигаем его.
 CFG.Retr = CFG.Retr ~= false
+-- СПИН-БОТ: вращаем своего персонажа (владелец физики — клиент,
+-- вращение реплицируется и ВИДНО ВСЕМ).
+CFG.Spin = CFG.Spin == true
+CFG.SpinSpeed = tonumber(CFG.SpinSpeed) or 30
 
 local STOPPED = false
 local Rayfield
-local mainConn, itemConn, auraConn, dangerConn
+local mainConn, itemConn, auraConn, dangerConn, spinConn
 local by = {}          -- [Player] = {char, gui, lbl, box, role, vis, roleAt}
 
 -- ============================================================
@@ -3047,6 +3051,23 @@ auraConn = RunService.Heartbeat:Connect(function()
     end
 end)
 
+-- СПИН-БОТ: владелец физики своего персонажа — клиент, поэтому
+-- вращение реплицируется на сервер и его ВИДЯТ ВСЕ игроки.
+spinConn = RunService.Heartbeat:Connect(function()
+    if STOPPED or not CFG.Spin then return end
+    local chr = LP.Character
+    local root = chr and chr:FindFirstChild("HumanoidRootPart")
+    local hum = chr and chr:FindFirstChildOfClass("Humanoid")
+    if root and hum and hum.Health > 0 then
+        if hum.AutoRotate then hum.AutoRotate = false end
+        pcall(function()
+            root.CFrame = root.CFrame * CFrame.Angles(0,
+                math.rad(math.clamp(tonumber(CFG.SpinSpeed) or 30,
+                    5, 180)), 0)
+        end)
+    end
+end)
+
 
 -- ============================================================
 --  GUI (Rayfield)
@@ -3127,7 +3148,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.35",
+        LoadingSubtitle = "ESP + Combat v2.36",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3153,6 +3174,9 @@ local okGUI, errGUI = pcall(function()
         ["Client aim (silent)"] = "Клиентский аим (сайлент)",
         ["Team & status"] = "Команда и статус",
         ["Movement"] = "Движение",
+        ["Spinbot (spin yourself)"] = "Спин-бот (крутиться)",
+        ["Spin speed (deg/frame)"] = "Скорость вращения (град/кадр)",
+        ["Switch team"] = "Сменить команду",
         ["Weapon giver (click detectors)"] = "Выдача оружия (клик-детекторы)",
         ["ESP guards"] = "ЕСП охраны", ["ESP prisoners"] = "ЕСП заключённых",
         ["ESP criminals"] = "ЕСП преступников",
@@ -3805,6 +3829,21 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.Team("Prisoner") end })
     C:CreateButton({ Name = "Team: ESCAPED (criminal)",
         Callback = function() G.PE.Team("Escaped") end })
+    C:CreateDropdown({
+        Name = "Switch team",
+        Flag = "PE_TeamPick",
+        Options = { "Guard", "Prisoner", "Escaped", "Undecided" },
+        CurrentOption = { "Guard" },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then
+                G.PE.Team(picked)
+                print("[PE] team switch: " .. picked)
+            end
+        end,
+    })
     C:CreateButton({ Name = "Reset to menu (escape cuffs)",
         Callback = function() G.PE.ResetMenu() end })
     C:CreateToggle({ Name = "Fast respawn (instant rejoin)",
@@ -3813,6 +3852,14 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.FastRespawn = v end })
 
     C:CreateSection("Movement")
+    C:CreateToggle({ Name = "Spinbot (spin yourself)",
+        Flag = "PE_Spin",
+        CurrentValue = CFG.Spin == true,
+        Callback = function(v) CFG.Spin = v end })
+    C:CreateSlider({ Name = "Spin speed (deg/frame)", Flag = "PE_SpinSpeed",
+        Range = {5, 180}, Increment = 5,
+        CurrentValue = math.clamp(tonumber(CFG.SpinSpeed) or 30, 5, 180),
+        Callback = function(v) CFG.SpinSpeed = v end })
     C:CreateToggle({ Name = "Anti-stun (taser/cuffs/ragdoll)", Flag = "PE_AntiStun",
         CurrentValue = CFG.AntiStun ~= false,
         Callback = function(v) CFG.AntiStun = v end })
@@ -4128,6 +4175,12 @@ G.PE_Stop = function()
     pcall(function() mouseConn1:Disconnect() end)
     pcall(function() mouseConn2:Disconnect() end)
     pcall(function() auraConn:Disconnect() end)
+    pcall(function() spinConn:Disconnect() end)
+    pcall(function()
+        local hum = LP.Character
+            and LP.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.AutoRotate = true end
+    end)
     pcall(function() paConn:Disconnect() end)
     pcall(function() prConn:Disconnect() end)
     pcall(function() diedConn:Disconnect() end)
@@ -4149,10 +4202,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.35 stopped")
+    print("[PE] v2.36 stopped")
 end
 
-print("[PE] v2.35 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.36 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
