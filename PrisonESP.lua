@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.21
+--  PRISON ESP  v2.22
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -368,12 +368,10 @@ local function drawBox(b, root, cam)
     -- 3D: 12 рёбер, каждое рисуется отдельно — угол за камерой прячет
     -- только своё ребро. Дальние рёбра бледнее и тоньше.
     if style == "3D box" then
-        local idx = { {1,2},{2,3},{3,4},{4,1},{5,6},{6,7},{7,8},{8,5},
-                      {1,5},{2,6},{3,7},{4,8} }
         for i = 1, 12 do
             local ln = b.lines[i]
-            local a = proj[idx[i][1]]
-            local c = proj[idx[i][2]]
+            local a = proj[BOX_EDGES[i][1]]
+            local c = proj[BOX_EDGES[i][2]]
             if ln and a.Z > 0 and c.Z > 0 then
                 local depth = (a.Z + c.Z) * 0.5
                 local far01 = math.clamp((depth - 14) / 70, 0, 1)
@@ -419,17 +417,14 @@ local function drawBox(b, root, cam)
 
     if style == "Corners" then
         local len = math.clamp(math.min(maxX - minX, maxY - minY) * 0.28, 5, 26)
-        local corners = {
-            { Vector2.new(minX, minY), Vector2.new(minX + len, minY), Vector2.new(minX, minY + len) },
-            { Vector2.new(maxX, minY), Vector2.new(maxX - len, minY), Vector2.new(maxX, minY + len) },
-            { Vector2.new(maxX, maxY), Vector2.new(maxX - len, maxY), Vector2.new(maxX, maxY - len) },
-            { Vector2.new(minX, maxY), Vector2.new(minX + len, maxY), Vector2.new(minX, maxY - len) },
-        }
-        for i = 1, 4 do
-            local c = corners[i]
-            setLine(i * 2 - 1, c[1], c[2])
-            setLine(i * 2, c[1], c[3])
-        end
+        setLine(1, Vector2.new(minX, minY), Vector2.new(minX + len, minY))
+        setLine(2, Vector2.new(minX, minY), Vector2.new(minX, minY + len))
+        setLine(3, Vector2.new(maxX, minY), Vector2.new(maxX - len, minY))
+        setLine(4, Vector2.new(maxX, minY), Vector2.new(maxX, minY + len))
+        setLine(5, Vector2.new(maxX, maxY), Vector2.new(maxX - len, maxY))
+        setLine(6, Vector2.new(maxX, maxY), Vector2.new(maxX, maxY - len))
+        setLine(7, Vector2.new(minX, maxY), Vector2.new(minX + len, maxY))
+        setLine(8, Vector2.new(minX, maxY), Vector2.new(minX, maxY - len))
         hideFrom(9)
         return
     end
@@ -559,10 +554,21 @@ do
     end
 end
 
+-- Константы рёбер (были таблицами в горячем цикле: ~15k аллокаций/сек).
+local BOX_EDGES = { {1,2},{2,3},{3,4},{4,1},{5,6},{6,7},{7,8},{8,5},
+                    {1,5},{2,6},{3,7},{4,8} }
+local SKEL_LINKS = { {1,2},{2,3},{2,4},{2,5},{3,6},{3,7} }
+local GROUND_FILTER = {}
+
 local function vProj(cam, pos)
-    local ok, sp = pcall(function() return cam:WorldToViewportPoint(pos) end)
-    if not ok or not sp then return nil end
-    return sp
+    -- NaN-позиции (глюк персонажа) отсеиваем сравнением с собой,
+    -- без pcall: замыкание на каждый вызов стоило ~18k аллокаций/сек.
+    if pos.X ~= pos.X or pos.Y ~= pos.Y or pos.Z ~= pos.Z then
+        return nil
+    end
+    local sp = cam:WorldToViewportPoint(pos)
+    if sp then return sp end
+    return nil
 end
 
 local function vSetLine(l, a, b, color, thickness)
@@ -739,7 +745,6 @@ function VIS.update(cam, myRoot)
                 local sp = parts[i] and vProj(cam, parts[i].Position)
                 pts[i] = (sp and sp.Z > 0) and Vector2.new(sp.X, sp.Y) or nil
             end
-            local links = { {1,2},{2,3},{2,4},{2,5},{3,6},{3,7} }
             local thick = math.max(1, tonumber(CFG.SkeletonThick) or 1)
             for i = 1, 6 do
                 local l = p.skeleton[i]
@@ -747,8 +752,8 @@ function VIS.update(cam, myRoot)
                     l = vLine()
                     p.skeleton[i] = l
                 end
-                local a = pts[links[i][1]]
-                local b = pts[links[i][2]]
+                local a = pts[SKEL_LINKS[i][1]]
+                local b = pts[SKEL_LINKS[i][2]]
                 if a and b then
                     vSetLine(l, a, b, color, thick)
                 else
@@ -864,13 +869,14 @@ function VIS.update(cam, myRoot)
         -- только когда цель стоит на земле (под прыгающими висело
         -- в воздухе) и не ближе/дальше порога; вблизи радиус ограничен.
         do
-            local mvRoot = (show and ch and ch.Parent)
+            local mvRoot = (show and ch and ch.Parent and CFG.GroundRing)
                 and ch:FindFirstChild("HumanoidRootPart") or nil
             local spRing, spRing2
             if mvRoot then
                 local feet
                 local okF, hitF = pcall(function()
-                    GROUND_RAY.FilterDescendantsInstances = { ch }
+                    GROUND_FILTER[1] = ch
+                    GROUND_RAY.FilterDescendantsInstances = GROUND_FILTER
                     return workspace:Raycast(
                         mvRoot.Position, Vector3.new(0, -8, 0), GROUND_RAY)
                 end)
@@ -1152,13 +1158,15 @@ local PE_ADMINS = {
 }
 local PE_CREATOR_ID = 0
 pcall(function() PE_CREATOR_ID = tonumber(game.CreatorId) or 0 end)
+local PE_IS_GROUP = false
+pcall(function()
+    PE_IS_GROUP = game.CreatorType == Enum.CreatorType.Group
+end)
 local function isAdminP(p)
     if PE_ADMINS[p.UserId] then return true end
-    if PE_CREATOR_ID == 0 then return false end
-    -- Если игру паблишила группа, CreatorId — id ГРУППЫ, а не человека:
-    -- совпадение с UserId игрока = ложный флаг.
-    local ok, ct = pcall(function() return game.CreatorType end)
-    if ok and ct == Enum.CreatorType.Group then return false end
+    -- Если игру паблишила группа, CreatorId — id ГРУППЫ: совпадение
+    -- с UserId игрока = ложный флаг.
+    if PE_CREATOR_ID == 0 or PE_IS_GROUP then return false end
     return p.UserId == PE_CREATOR_ID
 end
 
@@ -1216,12 +1224,21 @@ G.PE.TeamOf = function(p) return roleOf(p) end
 -- ============================================================
 --  ДОБАВЛЕНИЕ / УДАЛЕНИЕ ИГРОКОВ
 -- ============================================================
+-- Троттлы на игрока (поджог/подброс/тазер). Слабые ключи: ушедшие
+-- игроки не копятся, при выходе чистим руками для мгновенности.
+local PE_BURN_AT = setmetatable({}, { __mode = "k" })
+local PE_FLING_AT = setmetatable({}, { __mode = "k" })
+local PE_TASE_AT = setmetatable({}, { __mode = "k" })
+
 local function removePlayer(plr)
     local e = by[plr]
     if not e then return end
     if e.gui then pcall(function() e.gui:Destroy() end) end
     destroyBox(e.box)
     by[plr] = nil
+    PE_BURN_AT[plr] = nil
+    PE_FLING_AT[plr] = nil
+    PE_TASE_AT[plr] = nil
 end
 
 local function addPlayer(plr)
@@ -1305,6 +1322,7 @@ mainConn = RunService.RenderStepped:Connect(function()
                 if e.char ~= ch then
                     e.char = ch
                     e.role = roleOf(plr)
+                    e.admin = isAdminP(plr)
                     e.roleAt = nowT
                     destroyBox(e.box)
                     e.box = nil
@@ -1314,7 +1332,8 @@ mainConn = RunService.RenderStepped:Connect(function()
                 if nowT - (e.roleAt or 0) > 0.7 then
                     e.roleAt = nowT
                     e.role = roleOf(plr)
-                    if isAdminP(plr) and not e.adminWarned then
+                    e.admin = isAdminP(plr)
+                    if e.admin and not e.adminWarned then
                         e.adminWarned = true
                         warn("[PE] ADMIN ON SERVER: " .. plr.Name
                             .. " (userId " .. plr.UserId .. ") - be careful!")
@@ -1327,7 +1346,7 @@ mainConn = RunService.RenderStepped:Connect(function()
                 else
                     local role = e.role
                     local vis, color
-                    if isAdminP(plr) then
+                    if e.admin then
                         -- Админ: всегда заметен, магента поверх роли.
                         vis = CFG.AdminESP ~= false
                         color = Color3.fromRGB(255, 0, 255)
@@ -1374,37 +1393,51 @@ mainConn = RunService.RenderStepped:Connect(function()
                     if e.gui.Enabled ~= vis then e.gui.Enabled = vis end
 
                     if vis then
-                        local parts = {}
-                        if isAdminP(plr) then
-                            parts[#parts + 1] = "[ADMIN]"
-                        end
-                        if CFG.RoleTags then
-                            local tag = ROLE_TAG[role]
-                            if tag then parts[#parts + 1] = tag end
-                        end
-                        if CFG.WeaponESP then
-                            local tool = ch:FindFirstChildOfClass("Tool")
-                            if tool then parts[#parts + 1] = "[" .. tool.Name .. "]" end
-                        end
-                        if CFG.Names then parts[#parts + 1] = plr.DisplayName end
-                        if CFG.ShowDist and root and myRoot then
-                            parts[#parts + 1] = math.floor(
-                                (root.Position - myRoot.Position).Magnitude + 0.5) .. " st"
-                        end
-                        if CFG.ShowHP and humNow then
-                            if CFG.HPPercent and (humNow.MaxHealth or 0) > 0 then
-                                parts[#parts + 1] = string.format("HP %d%%",
-                                    math.floor(humNow.Health / humNow.MaxHealth * 100 + 0.5))
-                            else
-                                parts[#parts + 1] = "HP " .. math.floor(humNow.Health + 0.5)
+                        -- Текст лейбла собираем 10 раз/сек, не каждый
+                        -- кадр: ~25M аллокаций/час уходило на строки.
+                        if nowT - (e.lblAt or 0) > 0.1 then
+                            e.lblAt = nowT
+                            local parts = {}
+                            if e.admin then
+                                parts[#parts + 1] = "[ADMIN]"
                             end
+                            if CFG.RoleTags then
+                                local tag = ROLE_TAG[role]
+                                if tag then parts[#parts + 1] = tag end
+                            end
+                            if CFG.WeaponESP then
+                                local tool = ch:FindFirstChildOfClass("Tool")
+                                if tool then
+                                    parts[#parts + 1] = "[" .. tool.Name .. "]"
+                                end
+                            end
+                            if CFG.Names then
+                                parts[#parts + 1] = plr.DisplayName
+                            end
+                            if CFG.ShowDist and root and myRoot then
+                                parts[#parts + 1] = math.floor(
+                                    (root.Position - myRoot.Position).Magnitude
+                                        + 0.5) .. " st"
+                            end
+                            if CFG.ShowHP and humNow then
+                                if CFG.HPPercent
+                                   and (humNow.MaxHealth or 0) > 0 then
+                                    parts[#parts + 1] = string.format("HP %d%%",
+                                        math.floor(humNow.Health
+                                            / humNow.MaxHealth * 100 + 0.5))
+                                else
+                                    parts[#parts + 1] = "HP "
+                                        .. math.floor(humNow.Health + 0.5)
+                                end
+                            end
+                            if CFG.ShowSpeed and root then
+                                local spd = root.AssemblyLinearVelocity
+                                parts[#parts + 1] =
+                                    math.floor(spd.Magnitude + 0.5) .. " st/s"
+                            end
+                            local txt = table.concat(parts, "  ")
+                            if e.lbl.Text ~= txt then e.lbl.Text = txt end
                         end
-                        if CFG.ShowSpeed and root then
-                            local spd = root.AssemblyLinearVelocity
-                            parts[#parts + 1] = math.floor(spd.Magnitude + 0.5) .. " st/s"
-                        end
-                        local txt = table.concat(parts, "  ")
-                        if e.lbl.Text ~= txt then e.lbl.Text = txt end
                         local ts = tonumber(CFG.LabelSize) or 13
                         if e.lbl.TextSize ~= ts then
                             e.lbl.TextSize = ts
@@ -1533,6 +1566,7 @@ local DANGER_COLORS = {
 }
 local byDanger = {}
 local dangerScanAt = 0
+local dangerFullAt = 0
 dangerConn = RunService.Heartbeat:Connect(function()
     if STOPPED then return end
     if not CFG.DangerESP then
@@ -1543,32 +1577,40 @@ dangerConn = RunService.Heartbeat:Connect(function()
         return
     end
     local now = os.clock()
-    if now - dangerScanAt < 2 then return end
+    if now - dangerScanAt < 1 then return end
     dangerScanAt = now
     pcall(function()
+        -- Полный обход дерева (13k+ инстансов) раз в 12 с; между
+        -- обходами только проверяем, что найденные ещё живы.
+        local full = now - dangerFullAt > 12
+        if full then dangerFullAt = now end
         local seen = {}
-        for _, m in ipairs(workspace:GetDescendants()) do
-            if m:IsA("BasePart") and DANGER_COLORS[m.Name] then
-                seen[m] = true
-                local h = byDanger[m]
-                if not h or not h.Parent then
-                    local ok, nh = pcall(function()
-                        return Instance.new("Highlight") end)
-                    if ok and nh then
-                        nh.Adornee = m
-                        nh.Parent = m
-                        nh.FillTransparency = 0.45
-                        byDanger[m] = nh
-                        h = nh
+        if full then
+            for _, m in ipairs(workspace:GetDescendants()) do
+                if m:IsA("BasePart") and DANGER_COLORS[m.Name] then
+                    seen[m] = true
+                    local h = byDanger[m]
+                    if not h or not h.Parent then
+                        local ok, nh = pcall(function()
+                            return Instance.new("Highlight") end)
+                        if ok and nh then
+                            nh.Adornee = m
+                            nh.Parent = m
+                            nh.FillTransparency = 0.45
+                            byDanger[m] = nh
+                            h = nh
+                        end
+                    end
+                    if h then
+                        local col = DANGER_COLORS[m.Name]
+                        h.FillColor = col
+                        h.OutlineColor = col
+                        h.Enabled = true
                     end
                 end
-                if h then
-                    local col = DANGER_COLORS[m.Name]
-                    h.FillColor = col
-                    h.OutlineColor = col
-                    h.Enabled = true
-                end
             end
+        else
+            for k in pairs(byDanger) do seen[k] = true end
         end
         for k, h in pairs(byDanger) do
             if not seen[k] or not k.Parent then
@@ -1858,6 +1900,62 @@ G.PE.GiveAll = function()
 end
 
 -- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
+G.PE.ShopInfo = function()
+    local f = ReplicatedStorage:FindFirstChild("ShopRemotes")
+    local g = f and f:FindFirstChild("GetShopInfo")
+    if not g then
+        print("[PE SHOP] GetShopInfo not found")
+        return
+    end
+    local ok, res = pcall(function() return g:InvokeServer() end)
+    if not ok then
+        print("[PE SHOP] invoke failed: " .. tostring(res))
+        return
+    end
+    print("[PE SHOP] catalog: " .. tostring(res))
+end
+
+-- МАСКИРОВКА: телепорт к ближайшей Outfit-модели, клик по всем её
+-- ClickDetector'ам (та же семья «Item Give», серверный чек ~200
+-- стадов обходим подлётом) и возврат домой.
+G.PE.WearOutfit = function()
+    local root = LP.Character
+        and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not root then
+        print("[PE OUTFIT] no character")
+        return
+    end
+    local best, bestD
+    for _, m in ipairs(workspace:GetChildren()) do
+        if m:IsA("Model") and m.Name == "Outfit" then
+            local pp = m:FindFirstChildWhichIsA("BasePart", true)
+            if pp then
+                local d = (pp.Position - root.Position).Magnitude
+                if not bestD or d < bestD then best, bestD = m, d end
+            end
+        end
+    end
+    if not best then
+        print("[PE OUTFIT] no Outfit models found")
+        return
+    end
+    local pp = best:FindFirstChildWhichIsA("BasePart", true)
+    local orig = root.CFrame
+    pcall(function() root.CFrame = pp.CFrame + Vector3.new(0, 3, 0) end)
+    task.wait(0.15)
+    local n = 0
+    for _, cd in ipairs(best:GetDescendants()) do
+        if cd:IsA("ClickDetector") then
+            pcall(function() fireclickdetector(cd) end)
+            n = n + 1
+        end
+    end
+    task.wait(0.15)
+    pcall(function() root.CFrame = orig end)
+    print("[PE OUTFIT] clicked " .. n .. " detectors on nearest Outfit ("
+        .. math.floor(bestD) .. " studs away), returned home")
+end
+
 G.PE.Escape = function()
     local root = LP.Character
         and LP.Character:FindFirstChild("HumanoidRootPart")
@@ -2101,6 +2199,53 @@ G.PE.Tase = function(name)
     print("[PE TASE] " .. p.Name .. " tased x3 (position shots)")
 end
 
+-- ФЕЙК-ВЫСТРЕЛ: VisualizeBullet:FireServer(...) — сервер ретранслирует
+-- трассер ВСЕМ игрокам (так враги видят чужие пули). Подписура из
+-- GunScript_Local; урона нет — чистая психоз-атака: враг видит,
+-- как его «расстреливают» откуда угодно.
+G.PE.FakeShot = function(atSel)
+    local chr = LP.Character
+    local tool = chr and chr:FindFirstChildOfClass("Tool")
+    if not tool then
+        print("[PE FAKE] take any gun in hands")
+        return
+    end
+    local gsl = tool:FindFirstChild("GunScript_Local")
+    local vb = tool:FindFirstChild("VisualizeBullet")
+    local handle = tool:FindFirstChild("Handle")
+    if not (gsl and vb and handle) then
+        print("[PE FAKE] " .. tool.Name .. " has no VisualizeBullet")
+        return
+    end
+    local target = nil
+    if atSel then
+        local p = findPlayer(tostring(atSel))
+        local headF = p and p.Character
+            and p.Character:FindFirstChild("Head")
+        if headF then target = headF.Position end
+    end
+    if not target then
+        local m = LP:GetMouse()
+        target = m and m.Hit and m.Hit.Position
+    end
+    if not target then
+        print("[PE FAKE] no target position")
+        return
+    end
+    pcall(function()
+        vb:FireServer(handle, Vector3.new(0, 0.625, 1.25), target,
+            gsl:FindFirstChild("MuzzleEffect"),
+            gsl:FindFirstChild("HitEffect"),
+            186809061,
+            { false, 8, 0 },
+            { 25, Vector3.new(0.25, 0.25, 100),
+                BrickColor.new("Bright yellow").Color, 0.25,
+                Enum.Material.SmoothPlastic, 0.25 },
+            true, false)
+    end)
+    print("[PE FAKE] tracer sent -> " .. tostring(target))
+end
+
 -- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
 -- с какими аргументами игра честно стреляет InflictTarget.
 G.PE.GunSource = function()
@@ -2165,8 +2310,6 @@ local cuffAt = 0
 local taserAt = 0
 local stunAt = 0
 local modAt = 0
--- Троттлы на игрока: поджог/подброс/тазер (анти-«суперчеловек»-палитво).
-local PE_BURN_AT, PE_FLING_AT, PE_TASE_AT = {}, {}, {}
 local function auraTick()
     local now = os.clock()
 
@@ -2483,7 +2626,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.21",
+        LoadingSubtitle = "ESP + Combat v2.22",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2725,6 +2868,10 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.DangerESP = v end })
     M:CreateButton({ Name = "TELEPORT to escape zone",
         Callback = function() G.PE.Escape() end })
+    M:CreateButton({ Name = "WEAR nearest outfit (disguise)",
+        Callback = function() G.PE.WearOutfit() end })
+    M:CreateButton({ Name = "Shop catalog -> console",
+        Callback = function() G.PE.ShopInfo() end })
 
     -- ====================== ВКЛАДКА БОЙ ======================
     local C = safeNewTab(W, "Combat", "swords", "Combat")
@@ -2907,6 +3054,10 @@ local okGUI, errGUI = pcall(function()
         CurrentKeybind = "Y",
         HoldToInteract = false,
         Callback = function(v) G.PE.Tase(CFG._target) end })
+    C:CreateKeybind({ Name = "Fake shot at mouse", Flag = "PE_KB_Fake",
+        CurrentKeybind = "G",
+        HoldToInteract = false,
+        Callback = function(v) G.PE.FakeShot(nil) end })
 
     C:CreateSection("Taser (stun)")
     C:CreateParagraph({ Title = "Taser",
@@ -2936,6 +3087,12 @@ local okGUI, errGUI = pcall(function()
     })
     C:CreateButton({ Name = "TASE selected player (x3)",
         Callback = function() G.PE.Tase(CFG._target) end })
+
+    C:CreateSection("Fake shots (visual only)")
+    C:CreateParagraph({ Title = "Fake shots",
+        Content = "Sends a bullet tracer through the server's VisualizeBullet relay - everyone sees you shooting, zero damage. Button aims at the selected player, the G keybind fires at your mouse cursor. Needs a gun in hands." })
+    C:CreateButton({ Name = "FAKE SHOT at selected player",
+        Callback = function() G.PE.FakeShot(CFG._target) end })
 
     C:CreateSection("Team & status")
     C:CreateButton({ Name = "Team: GUARD",
@@ -3203,18 +3360,20 @@ G.PE_Stop = function()
     G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
     G.PE.Escape = nil
+    G.PE.WearOutfit, G.PE.ShopInfo = nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     G.PE.Tase = nil
+    G.PE.FakeShot = nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.21 stopped")
+    print("[PE] v2.22 stopped")
 end
 
-print("[PE] v2.21 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.22 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
