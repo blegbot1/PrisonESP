@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.15
+--  PRISON ESP  v2.16
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -142,6 +142,13 @@ CFG.ModGunDamage = tonumber(CFG.ModGunDamage) or 250
 -- Подброс жертв — 5-й аргумент (отдача вверх).
 CFG.AuraLifesteal = CFG.AuraLifesteal ~= false
 CFG.AuraFling = CFG.AuraFling == true
+-- ПОДЖОГ: 7-й аргумент InflictTarget (FlamingBullet) — серверный
+-- IgniteScript вешает на цель горение (урон по времени). Аура бьёт
+-- в голову (как настоящий хедшот).
+CFG.AuraBurn = CFG.AuraBurn ~= false
+CFG.GunFire = CFG.GunFire == true
+CFG.GunKnockback = tonumber(CFG.GunKnockback) or 0
+CFG.GunPiercing = tonumber(CFG.GunPiercing) or 5
 -- ПРОКАЧКА v2: полный список полей Setting-модуля (из Studio-копии
 -- игры): хедшот-множитель, дробовик, очередь, взрывные пули.
 CFG.GunHeadshot = tonumber(CFG.GunHeadshot) or 500
@@ -1896,10 +1903,15 @@ G.PE.ModGun = function(dmg)
     S.BurstRate = 0.05
     S.ReloadTime = 0.5
     S.Spread = 0
-    S.Piercing = 5
+    S.Piercing = tonumber(CFG.GunPiercing) or 5
     S.DelayBeforeFiring = 0
     S.DelayAfterFiring = 0
     S.CameraShakingEnabled = false
+    S.LimitedClipEnabled = false
+    -- Горящие пули: поджигает цель (серверный IgniteScript).
+    S.FlamingBullet = CFG.GunFire == true
+    -- Отдача: подбрасывает жертву.
+    S.Knockback = tonumber(CFG.GunKnockback) or 0
     -- Дробовик: N пуль за выстрел (урон умножается).
     if CFG.GunShotgun then
         S.ShotgunEnabled = true
@@ -1921,6 +1933,9 @@ G.PE.ModGun = function(dmg)
             .. " pellets") or "")
         .. (CFG.GunExplosive and (", explosive r"
             .. (tonumber(CFG.GunBoomRadius) or 25)) or "")
+        .. (CFG.GunFire and ", burning" or "")
+        .. (CFG.GunKnockback and (", knockback "
+            .. (tonumber(CFG.GunKnockback) or 0)) or "")
         .. ", auto, no spread")
 end
 
@@ -2210,8 +2225,12 @@ local function auraTick()
                     end
                     local heal = 0
                     if CFG.AuraLifesteal then heal = 1000000 end
+                    -- Бьём в голову (как настоящий хедшот) и поджигаем:
+                    -- огонь вешает серверный IgniteScript (урон по времени).
+                    local aimPart = ch:FindFirstChild("Head") or root
                     pcall(function()
-                        remote:FireServer(hum, root, dmg, dir, knock, heal, false)
+                        remote:FireServer(hum, aimPart, dmg, dir, knock, heal,
+                            CFG.AuraBurn ~= false)
                     end)
                 end
             end
@@ -2296,7 +2315,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.15",
+        LoadingSubtitle = "ESP + Combat v2.16",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2573,6 +2592,10 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_AuraFling",
         CurrentValue = CFG.AuraFling == true,
         Callback = function(v) CFG.AuraFling = v end })
+    C:CreateToggle({ Name = "Burn targets (fire DOT)",
+        Flag = "PE_AuraBurn",
+        CurrentValue = CFG.AuraBurn ~= false,
+        Callback = function(v) CFG.AuraBurn = v end })
     C:CreateButton({ Name = "Aura: ONLY selected player",
         Callback = function()
             CFG.KillAuraTeam = "Selected player"
@@ -2662,6 +2685,17 @@ local okGUI, errGUI = pcall(function()
         Range = {5, 60}, Increment = 5,
         CurrentValue = math.clamp(tonumber(CFG.GunBoomRadius) or 25, 5, 60),
         Callback = function(v) CFG.GunBoomRadius = v end })
+    C:CreateToggle({ Name = "Burning bullets (ignite)", Flag = "PE_GunFire",
+        CurrentValue = CFG.GunFire == true,
+        Callback = function(v) CFG.GunFire = v end })
+    C:CreateSlider({ Name = "Knockback (fling victims)", Flag = "PE_GunKnockback",
+        Range = {0, 100000}, Increment = 1000,
+        CurrentValue = math.clamp(tonumber(CFG.GunKnockback) or 0, 0, 100000),
+        Callback = function(v) CFG.GunKnockback = v end })
+    C:CreateSlider({ Name = "Piercing (walls/multi-hit)", Flag = "PE_GunPiercing",
+        Range = {0, 10}, Increment = 1,
+        CurrentValue = math.clamp(tonumber(CFG.GunPiercing) or 5, 0, 10),
+        Callback = function(v) CFG.GunPiercing = v end })
     C:CreateButton({ Name = "UPGRADE gun in hands",
         Callback = function() G.PE.ModGun() end })
 
@@ -2962,10 +2996,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.15 stopped")
+    print("[PE] v2.16 stopped")
 end
 
-print("[PE] v2.15 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.16 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
