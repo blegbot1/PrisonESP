@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.33
+--  PRISON ESP  v2.34
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -199,11 +199,14 @@ CFG.TexID = tostring(CFG.TexID or "")
 -- в прошлую команду. Даунтайм ~1.5с вместо стандартного респавна.
 CFG.FastRespawn = CFG.FastRespawn == true
 -- АВТО-ГИВЕР: после смерти сам выдаёт выбранное оружие (если сервер
--- ничего не выдал).
+-- ничего не выдал сам).
 CFG.AutoGive = CFG.AutoGive == true
 CFG.AutoGiveName = pickOpt(CFG.AutoGiveName, {
     "M9", "AK-74", "M16a4 MOD", "MP5 Short", "SVD", "PPSH-41",
     "MG42", "Kord", "Hammer", "KeyCard", "GIVE ALL" }, "M9")
+-- РЕТРИБУЦИЯ: получили урон — мгновенно находим атакующего
+-- (вооружённые в приоритете) и сжигаем его.
+CFG.Retr = CFG.Retr ~= false
 
 local STOPPED = false
 local Rayfield
@@ -2556,6 +2559,32 @@ local modAt = 0
 local silentAt = 0
 local immortalAt = 0
 local c00lAt = 0
+local retAt = 0
+local PE_LAST_HP = -1
+local PE_HIT_AT = 0
+local retTarget, retUntil = nil, 0
+
+-- Поиск атакующего: кто вероятнее ударил/выстрелил — ближайший,
+-- вооружённые получают приоритет (−30 стадов к счёту дистанции).
+local function findAttacker(myRoot)
+    local bestP, bestS
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            local ch = p.Character
+            local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+            local root = ch and ch:FindFirstChild("HumanoidRootPart")
+            if ch and hum and hum.Health > 0 and root then
+                local d = (root.Position - myRoot.Position).Magnitude
+                local armed = ch:FindFirstChildOfClass("Tool") ~= nil
+                local score = d - (armed and 30 or 0)
+                if not bestS or score < bestS then
+                    bestP, bestS = p, score
+                end
+            end
+        end
+    end
+    return bestP
+end
 
 -- Зажатие ЛКМ для клиентского аима.
 local PE_MOUSE_DOWN = false
@@ -2648,6 +2677,55 @@ local function silentShot()
 end
 local function auraTick()
     local now = os.clock()
+
+    -- РЕТРИБУЦИЯ: нас ударили/подстрелили — вычисляем атакующего
+    -- и сжигаем его (урон ауры + поджог, залп ~1.5с).
+    if CFG.Retr then
+        local chrR = LP.Character
+        local humR = chrR and chrR:FindFirstChildOfClass("Humanoid")
+        local rootR = chrR and chrR:FindFirstChild("HumanoidRootPart")
+        if humR and rootR then
+            local hp = humR.Health
+            if PE_LAST_HP >= 0 and hp > 0 and hp < PE_LAST_HP - 0.5
+               and now - PE_HIT_AT > 0.3 then
+                PE_HIT_AT = now
+                local atk = findAttacker(rootR)
+                if atk then
+                    retTarget = atk
+                    retUntil = now + 1.5
+                    print("[PE RET] attacker: " .. atk.Name .. " -> BURN")
+                end
+            end
+            PE_LAST_HP = hp
+        else
+            PE_LAST_HP = -1
+        end
+        if retTarget and now < retUntil then
+            local chA = retTarget.Character
+            local humA = chA and chA:FindFirstChildOfClass("Humanoid")
+            local headA = chA and (chA:FindFirstChild("Head")
+                or chA:FindFirstChild("HumanoidRootPart"))
+            local remoteR = myGunRemote("InflictTarget")
+            if remoteR and humA and humA.Health > 0 and headA
+               and now - retAt >= 0.1 then
+                retAt = now
+                local bt = PE_BURN_AT[retTarget]
+                local burnR = (not bt or now - bt > 1.5)
+                if burnR then PE_BURN_AT[retTarget] = now end
+                local dmgR = math.clamp(
+                    tonumber(CFG.KillAuraDamage) or 50, 1, 5000)
+                pcall(function()
+                    remoteR:FireServer(humA, headA, dmgR,
+                        Vector3.new(0, 1, 0), 0, 0, burnR)
+                end)
+            end
+            if not humA or humA.Health <= 0 then
+                retTarget = nil
+            end
+        else
+            retTarget = nil
+        end
+    end
 
     -- КЛИЕНТСКИЙ АИМ: зажата ЛКМ с пушкой — «выстрелы» уходят точно
     -- в цель у прицела (сквозь стены), с трассером.
@@ -3049,7 +3127,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.33",
+        LoadingSubtitle = "ESP + Combat v2.34",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3347,6 +3425,10 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_AuraBurn",
         CurrentValue = CFG.AuraBurn ~= false,
         Callback = function(v) CFG.AuraBurn = v end })
+    C:CreateToggle({ Name = "Auto-burn attacker (retribution)",
+        Flag = "PE_Retr",
+        CurrentValue = CFG.Retr ~= false,
+        Callback = function(v) CFG.Retr = v end })
     C:CreateToggle({ Name = "Immortality (self-heal loop, 0 dmg)",
         Flag = "PE_Immortal",
         CurrentValue = CFG.Immortal == true,
@@ -3879,10 +3961,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.33 stopped")
+    print("[PE] v2.34 stopped")
 end
 
-print("[PE] v2.33 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.34 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
