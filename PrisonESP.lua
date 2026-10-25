@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.17
+--  PRISON ESP  v2.18
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -168,6 +168,9 @@ CFG.TaserTeam = pickOpt(CFG.TaserTeam, {
     "Except my team")
 -- ОПАСНЫЕ ЗОНЫ: Death Part подсветка + телепорт к зоне побега.
 CFG.DangerESP = CFG.DangerESP == true
+-- АВТО-ПРОКАЧКА: новая пушка в руках (респавн/смена) — апгрейд
+-- применяется сам, кнопку жать не надо.
+CFG.ModGunAuto = CFG.ModGunAuto ~= false
 
 local STOPPED = false
 local Rayfield
@@ -2008,6 +2011,7 @@ G.PE.ModGun = function(dmg)
         S.Radius = tonumber(CFG.GunBoomRadius) or 25
     end
     S.Lifesteal = CFG.AuraLifesteal and 1000 or 0
+    pcall(function() tool:SetAttribute("PE_Marked", true) end)
     print("[PE MOD] " .. tool.Name .. " upgraded: damage " .. dmg
         .. ", headshot x" .. (tonumber(CFG.GunHeadshot) or 500)
         .. (CFG.GunShotgun and (", shotgun " .. (tonumber(CFG.GunPellets) or 8)
@@ -2068,7 +2072,8 @@ G.PE.GunSource = function()
     local any = false
     local allTxt = {}
     for _, t in ipairs(toolList()) do
-        for _, scrName in ipairs({ "GunScript_Local", "GunScript_Server" }) do
+        for _, scrName in ipairs({ "GunScript_Local", "GunScript_Server",
+            "Main", "Cuff server", "LocalScript" }) do
             local scr = t:FindFirstChild(scrName)
             if scr then
                 local ok, src = pcall(decompile, scr)
@@ -2120,8 +2125,20 @@ local auraAt = 0
 local cuffAt = 0
 local taserAt = 0
 local stunAt = 0
+local modAt = 0
 local function auraTick()
     local now = os.clock()
+
+    -- АВТО-ПРОКАЧКА: пушка без метки в руках — апгрейдим сразу.
+    if CFG.ModGunAuto ~= false and now - modAt >= 1 then
+        modAt = now
+        local chrM = LP.Character
+        local toolM = chrM and chrM:FindFirstChildOfClass("Tool")
+        if toolM and toolM:FindFirstChild("Setting")
+           and not toolM:GetAttribute("PE_Marked") then
+            G.PE.ModGun()
+        end
+    end
 
     -- CUFF-АУРА: сковывает наручниками ближайшего врага (Handcuffs
     -- должны быть в руках/рюкзаке — выдаются за GUARD).
@@ -2396,7 +2413,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.17",
+        LoadingSubtitle = "ESP + Combat v2.18",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2787,6 +2804,10 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.GunPiercing = v end })
     C:CreateButton({ Name = "UPGRADE gun in hands",
         Callback = function() G.PE.ModGun() end })
+    C:CreateToggle({ Name = "Auto-upgrade (equip/respawn)",
+        Flag = "PE_ModGunAuto",
+        CurrentValue = CFG.ModGunAuto ~= false,
+        Callback = function(v) CFG.ModGunAuto = v end })
 
     C:CreateSection("Taser (stun)")
     C:CreateParagraph({ Title = "Taser",
@@ -3089,10 +3110,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.17 stopped")
+    print("[PE] v2.18 stopped")
 end
 
-print("[PE] v2.17 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.18 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
