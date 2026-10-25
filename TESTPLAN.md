@@ -35,6 +35,12 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/blegbot1/PrisonESP/ma
 - д) "Who to hit" → "Selected player" (или кнопка "Aura: ONLY selected player"; цель задать в Combat → Cuffs & teleport → "Victim (pick a player)" — `[PE] target = <ник>`): бьёт ТОЛЬКО его с любой дистанции.
 - Провал: HP целей не падает → сервер валидирует дистанцию → агенту переработать.
 
+## 4б. КЛИЕНТСКИЙ АИМ (Combat → Client aim (silent); пушка в руках)
+- Включить "Silent aim (crosshair target, walls)", навести прицел РЯДОМ с врагом (в радиусе FOV, по умолч. 180px) и зажать ЛКМ.
+- Успех: HP врага тает с каждого «выстрела», даже если он ЗА СТЕНОЙ; трассер визуально прилетает в жертву (видно всем). Урон = прокачанному Setting пушки (с ModGun — огромный).
+- "Aim FOV radius" — радиус захвата от прицела в пикселях; "Who to aim at" — фильтр целей (в т.ч. «Selected player»).
+- Провал: HP не падает → сервер валидирует дистанцию/источник → агенту переделать.
+
 ## 5. ТАЗЕР (нужен GUARD: "Team: GUARD" → респавн → Taser в рюкзаке)
 - а) "TASE selected player (x3)" (или Y): успех = `[PE TASE] <ник> tased x3 (position shots)`, цель падает/замирает.
 - б) "Taser aura" (или T): враги в радиусе станятся сами; без тулзы warn "no Taser tool (switch to GUARD)".
