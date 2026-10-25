@@ -1,0 +1,25 @@
+=== GUI strings NOT in PE_RU (stay EN in RU mode) ===
+MISS: c00lkidd
+MISS: HP
+MISS: Language / Язык
+MISS: Menu language / Язык меню
+
+=== Dead RU keys (no matching GUI string) ===
+DEAD: Away from me
+DEAD: Client aim (silent)
+DEAD: Cuff aura (nearest enemy)
+DEAD: CUFF player
+DEAD: Cuffs & teleport
+DEAD: Random
+DEAD: TASE selected player (x3)
+DEAD: Taser (stun)
+DEAD: Taser aura (stun everyone near)
+DEAD: Taser delay
+DEAD: TELEPORT + CUFF (combo)
+DEAD: TELEPORT to player (behind)
+DEAD: Up
+DEAD: Victim (pick a player)
+DEAD: Who to cuff
+DEAD: Who to tase
+
+gui strings: 142 | ru keys: 154
