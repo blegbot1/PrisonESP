@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.22
+--  PRISON ESP  v2.23
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -266,6 +266,10 @@ end
 
 -- Коробка по Model:GetBoundingBox(): облегает ВСЁ тело и
 -- поворачивается вместе с игроком. Стили: рамка / уголки / 3D.
+-- Константа рёбер 3D-коробки (модульный скоуп, ДО drawBox — иначе
+-- в горячем цикле резолвилась в nil-глобал и коробки молча умирали).
+local BOX_EDGES = { {1,2},{2,3},{3,4},{4,1},{5,6},{6,7},{7,8},{8,5},
+                    {1,5},{2,6},{3,7},{4,8} }
 local function drawBox(b, root, cam)
     if not b or not b.lines then return end
     local camera = cam or workspace.CurrentCamera
@@ -554,9 +558,7 @@ do
     end
 end
 
--- Константы рёбер (были таблицами в горячем цикле: ~15k аллокаций/сек).
-local BOX_EDGES = { {1,2},{2,3},{3,4},{4,1},{5,6},{6,7},{7,8},{8,5},
-                    {1,5},{2,6},{3,7},{4,8} }
+-- Константы VIS (были таблицами в горячем цикле: ~15k аллокаций/сек).
 local SKEL_LINKS = { {1,2},{2,3},{2,4},{2,5},{3,6},{3,7} }
 local GROUND_FILTER = {}
 
@@ -869,10 +871,12 @@ function VIS.update(cam, myRoot)
         -- только когда цель стоит на земле (под прыгающими висело
         -- в воздухе) и не ближе/дальше порога; вблизи радиус ограничен.
         do
-            local mvRoot = (show and ch and ch.Parent and CFG.GroundRing)
+            local mvRoot = (show and ch and ch.Parent)
                 and ch:FindFirstChild("HumanoidRootPart") or nil
             local spRing, spRing2
-            if mvRoot then
+            -- Рейкаст земли нужен только кольцу; mvRoot дальше
+            -- использует вектор движения — его не гасим.
+            if mvRoot and CFG.GroundRing then
                 local feet
                 local okF, hitF = pcall(function()
                     GROUND_FILTER[1] = ch
@@ -1944,11 +1948,15 @@ G.PE.WearOutfit = function()
     pcall(function() root.CFrame = pp.CFrame + Vector3.new(0, 3, 0) end)
     task.wait(0.15)
     local n = 0
-    for _, cd in ipairs(best:GetDescendants()) do
-        if cd:IsA("ClickDetector") then
-            pcall(function() fireclickdetector(cd) end)
-            n = n + 1
+    if type(fireclickdetector) == "function" then
+        for _, cd in ipairs(best:GetDescendants()) do
+            if cd:IsA("ClickDetector") then
+                pcall(function() fireclickdetector(cd) end)
+                n = n + 1
+            end
         end
+    else
+        print("[PE OUTFIT] no fireclickdetector in this executor")
     end
     task.wait(0.15)
     pcall(function() root.CFrame = orig end)
@@ -2626,7 +2634,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.22",
+        LoadingSubtitle = "ESP + Combat v2.23",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3370,10 +3378,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.22 stopped")
+    print("[PE] v2.23 stopped")
 end
 
-print("[PE] v2.22 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.23 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
