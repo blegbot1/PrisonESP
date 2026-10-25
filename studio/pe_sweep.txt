@@ -1,0 +1,43 @@
+[require(] GunScript_Local :: ...ript.Parent:WaitForChild("VisualizeBullet") local Setting = require(Parent:WaitForChild("Setting")) local GunScript_Server = Parent:WaitForChild("GunScript_Serv
+[require(] Mouse Sensitivity :: ...local u67, v1, v2, v3, v4, v5 local MouseSensitive = require(script.Parent.Parent:WaitForChild("Setting")).MouseSensitive local atan2 = math.atan2 local asin = 
+[MarketplaceService] Local Gamepass shop :: ...licatedStorage = game:GetService("ReplicatedStorage") local MarketplaceService = game:GetService("MarketplaceService") local LocalPlayer = Players.LocalPlayer l
+[PromptGamePassPurchase] Local Gamepass shop :: ...alPlayer (upval), Swat (val) MarketplaceService:PromptGamePassPurchase(LocalPlayer, Swat.GamepassId) end) v2.MouseButton1Click:Conne
+[PromptProductPurchase] Local Gamepass shop :: ...2.DevProductId ~= 0 then MarketplaceService:PromptProductPurchase(LocalPlayer, MG42.DevProductId) return end 
+[require(] PlayerModule :: ... (val) local v1 = setmetatable({}, u0) v1.cameras = require(script:WaitForChild("CameraModule")) v1.controls = require(script:WaitForChild("ControlM
+[require(] CameraModule :: ...t.Parent:WaitForChild("CommonUtils") local ConnectionUtil = require(CommonUtils:WaitForChild("ConnectionUtil")) local FlagUtil = require(CommonUtils:WaitForChil
+[require(] ClassicCamera :: ...cript.Parent.Parent:WaitForChild("CommonUtils") local u27 = require(CommonUtils:WaitForChild("FlagUtil")).getUserFlag("UserFixCameraFPError") local Players = ga
+[require(] VRBaseCamera :: ...ttings():GetService("UserGameSettings") local CameraInput = require(script.Parent:WaitForChild("CameraInput")) local ZoomController = require(script.Parent:Wait
+[require(] CameraInput :: ....Parent.Parent:WaitForChild("CommonUtils") local FlagUtil = require(CommonUtils:WaitForChild("FlagUtil")) local u52 = FlagUtil.getUserFlag("UserPSSinkUnknownTou
+[require(] VehicleCamera :: ...nService = game:GetService("RunService") local BaseCamera = require(script.Parent:WaitForChild("BaseCamera")) local CameraInput = require(script.Parent:WaitForC
+[require(] VehicleCameraCore :: ...local CameraUtils = require(script.Parent.Parent.CameraUtils) local VehicleCameraConfig = require(script.Parent.VehicleCameraConfig) local map = CameraUtils.map
+[require(] Poppercam :: ....Parent.Parent:WaitForChild("CommonUtils") local FlagUtil = require(CommonUtils:WaitForChild("FlagUtil")) local u21 = require(script.Parent:WaitForChild("ZoomCo
+[require(] VRCamera :: ...("VRService") UserSettings():GetService("UserGameSettings") require(script.Parent:WaitForChild("CameraInput")) require(script.Parent:WaitForChild("CameraUtils")
+[require(] CameraToggleStateController :: ...ttings():GetService("UserGameSettings") local CameraInput = require(script.Parent:WaitForChild("CameraInput")) local CameraUI = require(script.Parent:WaitForChi
+[require(] Invisicam :: ...cript.Parent.Parent:WaitForChild("CommonUtils") local u21 = require(CommonUtils:WaitForChild("FlagUtil")).getUserFlag("UserRaycastUpdateAPI2") local u22 = { 
+[require(] LegacyCamera :: ...Vector2.new() require(script.Parent:WaitForChild("CameraUtils")) local CameraInput = require(script.Parent:WaitForChild("CameraInput")) local Players = game:Get
+[require(] OrbitalCamera :: ...cript.Parent.Parent:WaitForChild("CommonUtils") local u16 = require(CommonUtils:WaitForChild("FlagUtil")).getUserFlag("UserFixOrbitalCameraAzimuth") local Camer
+[require(] ZoomController :: ...local Popper = require(script:WaitForChild("Popper")) local clamp = math.clamp local exp = math.exp local min = math.min local max = math.max local CameraMinZoo
+[require(] Popper :: ....Parent.Parent:WaitForChild("CommonUtils") local FlagUtil = require(CommonUtils:WaitForChild("FlagUtil")) local CameraWrapper = require(CommonUtils:WaitForChild
+[require(] TransparencyController :: ...ire", "Smoke", "Sparkles", "Explosion"} local CameraUtils = require(script.Parent:WaitForChild("CameraUtils")) local u23 = {} u23.__index = u23 function u23.ne
+[require(] BaseCamera :: ...t.Parent:WaitForChild("CommonUtils") local ConnectionUtil = require(CommonUtils:WaitForChild("ConnectionUtil")) require(CommonUtils:WaitForChild("FlagUtil")) lo
+[require(] MouseLockController :: ....Parent.Parent:WaitForChild("CommonUtils") local FlagUtil = require(CommonUtils:WaitForChild("FlagUtil")) local Value = Enum.ContextActionPriority.Medium.Value 
+[require(] VRCameraTeleportDetector.spec :: ...kages = game:GetService("CorePackages") local JestGlobals = require(CorePackages.Packages.Dev.JestGlobals) local describe = JestGlobals.describe local expect = 
+[require(] VRVehicleCamera :: ...local u0 = {0, 30} local VRBaseCamera = require(script.Parent:WaitForChild("VRBaseCamera")) local CameraUtils = require(script.Parent:WaitForChild("CameraUtils"
+[require(] ControlModule :: ... script.Parent:WaitForChild("CommonUtils") local Keyboard = require(script:WaitForChild("Keyboard")) local Gamepad = require(script:WaitForChild("Gamepad")) loc
+[require(] Keyboard :: ...) local u18 = Vector3.new() local BaseCharacterController = require(script.Parent:WaitForChild("BaseCharacterController")) local u30 = setmetatable({}, BaseChar
+[require(] BaseCharacterController :: ...t.Parent:WaitForChild("CommonUtils") local ConnectionUtil = require(CommonUtils:WaitForChild("ConnectionUtil")) local u15 = Vector3.new() local u16 = {} u16.__i
+[require(] Gamepad :: ...cript.Parent.Parent:WaitForChild("CommonUtils") local u26 = require(CommonUtils:WaitForChild("FlagUtil")).getUserFlag("UserPlayerScriptsSupportTVRemoteKeycodes"
+[require(] TouchJump :: ...t.Parent:WaitForChild("CommonUtils") local ConnectionUtil = require(CommonUtils:WaitForChild("ConnectionUtil")) local CharacterUtil = require(CommonUtils:WaitFo
+[require(] TouchThumbstick :: ...cript.Parent.Parent:WaitForChild("CommonUtils") local u37 = require(CommonUtils:WaitForChild("FlagUtil")).getUserFlag("UserAllowAbilityControls") local u47 = ni
+[require(] ClickToMoveController :: ...cript.Parent.Parent:WaitForChild("CommonUtils") local u68 = require(CommonUtils:WaitForChild("FlagUtil")).getUserFlag("UserRaycastUpdateAPI2") local u69 = true 
+[require(] PathDisplay :: ...cript.Parent.Parent:WaitForChild("CommonUtils") local u16 = require(CommonUtils:WaitForChild("FlagUtil")).getUserFlag("UserRaycastUpdateAPI2") local u18 = Rayca
+[require(] ClickToMoveDisplay :: ...cript.Parent.Parent:WaitForChild("CommonUtils") local u73 = require(CommonUtils:WaitForChild("FlagUtil")).getUserFlag("UserRaycastUpdateAPI2") local LocalPlayer
+[require(] AvatarAbilitiesInterface :: ...s = script.Parent.Parent:WaitForChild("CommonUtils") if not require(CommonUtils:WaitForChild("FlagUtil")).getUserFlag("UserAllowAbilityControls") then retur
+[require(] DynamicThumbstick :: ....Parent.Parent:WaitForChild("CommonUtils") local FlagUtil = require(CommonUtils:WaitForChild("FlagUtil")) local u62 = FlagUtil.getUserFlag("UserAllowAbilityCont
+[require(] VRNavigation :: ....Parent.Parent:WaitForChild("CommonUtils") local FlagUtil = require(CommonUtils:WaitForChild("FlagUtil")) local u48 = nil local LocalPlayer = Players.LocalPlaye
+[require(] ConnectionUtil.spec :: ...kages = game:GetService("CorePackages") local JestGlobals = require(CorePackages.Packages.Dev.JestGlobals) local describe = JestGlobals.describe local expect = 
+[require(] CameraWrapper :: ...local ConnectionUtil = require(script.Parent.ConnectionUtil) local u5 = {} u5.__index = u5 function u5.new() -- Line: 39 -- upvalues: ConnectionUtil (val), u5 
+[require(] CharacterUtil :: ...Players = game:GetService("Players") local ConnectionUtil = require(script.Parent:WaitForChild("ConnectionUtil")) local u14 = {} u14._connectionUtil = Connectio
+[require(] CameraWrapper.spec :: ...kages = game:GetService("CorePackages") local JestGlobals = require(CorePackages.Packages.Dev.JestGlobals) local describe = JestGlobals.describe local expect = 
+[require(] RbxCharacterSounds :: ...ice = game:GetService("SoundService") local AtomicBinding = require(script:WaitForChild("AtomicBinding")) local function loadFlag(a1) -- Line: 12 -- types: a1:
+swept sources: 90

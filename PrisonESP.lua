@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.40
+--  PRISON ESP  v2.41
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -134,6 +134,16 @@ CFG.ModGunDamage = tonumber(CFG.ModGunDamage) or 250
 -- Подброс жертв — 5-й аргумент (отдача вверх).
 CFG.AuraLifesteal = CFG.AuraLifesteal ~= false
 CFG.AuraFling = CFG.AuraFling == true
+CFG.FlingDir = pickOpt(CFG.FlingDir, {
+    "Up", "Away from me", "Random" }, "Up")
+-- БЕСКОНЕЧНЫЙ РАДИУС: сервер не проверяет дистанцию InflictTarget
+-- (доказано живым тестом c00lkidd-режима — горело по всему серверу).
+CFG.AuraInfRange = CFG.AuraInfRange == true
+-- ЗВУК УБИЙСТВА: цели ауры умерли — короткий бип (только у тебя).
+CFG.KillSound = CFG.KillSound == true
+-- ЧАМСЫ: Highlight-подсветка персонажей цветом роли, сквозь стены.
+CFG.Chams = CFG.Chams == true
+local chamsScanAt = 0
 -- ПОДЖОГ: 7-й аргумент InflictTarget (FlamingBullet) — серверный
 -- IgniteScript вешает на цель горение (урон по времени). Аура бьёт
 -- в голову (как настоящий хедшот).
@@ -195,7 +205,7 @@ CFG.JumpPower = tonumber(CFG.JumpPower) or 90
 
 local STOPPED = false
 local Rayfield
-local mainConn, itemConn, auraConn, dangerConn
+local mainConn, itemConn, auraConn, dangerConn, chamsConn
 local by = {}          -- [Player] = {char, gui, lbl, box, role, vis, roleAt}
 
 -- ============================================================
@@ -1469,6 +1479,22 @@ mainConn = RunService.RenderStepped:Connect(function()
                         vis = false
                     end
 
+                    -- Звук убийства: цель ауры умерла — бип (локально).
+                    if CFG.KillSound and humNow then
+                        local hp = humNow.Health
+                        if e.lastHP and e.lastHP > 0 and hp <= 0 then
+                            pcall(function()
+                                local snd = Instance.new("Sound")
+                                snd.SoundId = "rbxassetid://186809061"
+                                snd.Volume = 0.5
+                                snd.Parent = game:GetService("SoundService")
+                                snd:Play()
+                                game:GetService("Debris"):AddItem(snd, 3)
+                            end)
+                        end
+                        e.lastHP = hp
+                    end
+
                     e.vis = vis
                     if e.gui.Enabled ~= vis then e.gui.Enabled = vis end
 
@@ -1696,6 +1722,72 @@ dangerConn = RunService.Heartbeat:Connect(function()
             if not seen[k] or not k.Parent then
                 pcall(function() h:Destroy() end)
                 byDanger[k] = nil
+            end
+        end
+    end)
+end)
+
+-- ЧАМСЫ: Highlight на каждом персонаже, цвет по роли, сквозь стены.
+local byChams = setmetatable({}, { __mode = "k" })
+local chamsConn = RunService.Heartbeat:Connect(function()
+    if STOPPED then return end
+    if not CFG.Chams then
+        for _, h in pairs(byChams) do
+            pcall(function() h:Destroy() end)
+        end
+        byChams = setmetatable({}, { __mode = "k" })
+        return
+    end
+    local nowC = os.clock()
+    if nowC - (chamsScanAt or 0) < 0.5 then return end
+    chamsScanAt = nowC
+    pcall(function()
+        local seen = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP and p.Character and p.Character.Parent then
+                local chC = p.Character
+                seen[chC] = true
+                local h = byChams[chC]
+                if not h or not h.Parent then
+                    local ok, nh = pcall(function()
+                        local hl = Instance.new("Highlight")
+                        hl.FillTransparency = 0.7
+                        hl.OutlineTransparency = 0
+                        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        hl.Parent = chC
+                        return hl
+                    end)
+                    if ok and nh then
+                        byChams[chC] = nh
+                        h = nh
+                    end
+                end
+                if h then
+                    local col
+                    if isAdminP(p) then
+                        col = Color3.fromRGB(255, 0, 255)
+                    else
+                        local r = roleOf(p)
+                        if r == "guard" then
+                            col = safeColor(CFG.ColGuard, Color3.new(0.3, 0.7, 1))
+                        elseif r == "prisoner" then
+                            col = safeColor(CFG.ColPris, Color3.new(1, 0.65, 0.25))
+                        elseif r == "criminal" then
+                            col = safeColor(CFG.ColCrim, Color3.new(1, 0.2, 0.2))
+                        else
+                            col = safeColor(CFG.ColOther, Color3.new(0.8, 0.8, 0.8))
+                        end
+                    end
+                    h.FillColor = col
+                    h.OutlineColor = col
+                    h.Enabled = true
+                end
+            end
+        end
+        for k, h in pairs(byChams) do
+            if not seen[k] or not k.Parent then
+                pcall(function() h:Destroy() end)
+                byChams[k] = nil
             end
         end
     end)
@@ -2648,8 +2740,11 @@ local function auraTick()
                 -- дистанции; «Everyone» — все в радиусе.
                 local isSel = (mode ~= "Everyone" and mode ~= ""
                     and (p.Name == mode or p.DisplayName == mode))
-                local inRange = (root.Position - myRoot.Position).Magnitude
-                    <= radius
+                -- Бесконечный радиус: сервер дистанцию InflictTarget
+                -- не проверяет (подтверждено c00lkidd-тестом).
+                local inRange = CFG.AuraInfRange
+                    or ((root.Position - myRoot.Position).Magnitude
+                        <= radius)
                 local ok = isSel
                     or ((mode == "Everyone" or mode == "") and inRange)
                 if ok then
@@ -2669,7 +2764,22 @@ local function auraTick()
                         if not ft or now - ft > 0.5 then
                             PE_FLING_AT[p] = now
                             knock = 20000
-                            dir = Vector3.new(0, 1, 0)
+                            -- Направление подброса: вверх / от себя /
+                            -- рандом (пинбол).
+                            local fd = CFG.FlingDir or "Up"
+                            if fd == "Away from me" then
+                                dir = delta.Unit
+                            elseif fd == "Random" then
+                                dir = Vector3.new(
+                                    math.random() - 0.5,
+                                    math.random() * 0.8 + 0.4,
+                                    math.random() - 0.5)
+                                if dir.Magnitude > 0.01 then
+                                    dir = dir.Unit
+                                end
+                            else
+                                dir = Vector3.new(0, 1, 0)
+                            end
                         end
                     end
                     local heal = 0
@@ -2793,7 +2903,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.40",
+        LoadingSubtitle = "ESP + Combat v2.41",
         -- Сохранение настроек Rayfield: включаем только если в
         -- исполнителе есть файловая система (сам Rayfield проверит
         -- и предупредит, если нет). Наши дефолты живут в getgenv().
@@ -2882,6 +2992,13 @@ local okGUI, errGUI = pcall(function()
         ["Who to hit"] = "Кого бить",
         ["Lifesteal (heal self per hit)"] = "Вампиризм (хил за удар)",
         ["Fling targets (mega knockback up)"] = "Подброс жертв (мега-отдача)",
+        ["Fling direction"] = "Направление подброса",
+        ["Up"] = "Вверх",
+        ["Away from me"] = "От себя",
+        ["Random"] = "Рандом (пинбол)",
+        ["Infinite aura range (whole map)"] = "Бесконечный радиус ауры (вся карта)",
+        ["Kill sound (death beep)"] = "Звук убийства (бип при смерти)",
+        ["Chams (role highlight, through walls)"] = "Чамсы (подсветка по роли, сквозь стены)",
         ["Burn targets (fire DOT)"] = "Поджог целей (огонь по времени)",
         ["Auto-burn attacker (retribution)"] = "Авто-сожжение атакующего",
         ["Immortality (self-heal loop, 0 dmg)"] = "Бессмертие (хил-цикл, 0 урона)",
@@ -3009,6 +3126,10 @@ local okGUI, errGUI = pcall(function()
     T:CreateToggle({ Name = "Admins highlight + alert", Flag = "PE_AdminESP",
         CurrentValue = CFG.AdminESP ~= false,
         Callback = function(v) CFG.AdminESP = v end })
+    T:CreateToggle({ Name = "Chams (role highlight, through walls)",
+        Flag = "PE_Chams",
+        CurrentValue = CFG.Chams == true,
+        Callback = function(v) CFG.Chams = v end })
     T:CreateColorPicker({ Name = "Criminal color", Flag = "PE_ColCrim",
         Color = CFG.ColCrim, Callback = function(c) CFG.ColCrim = c end })
     T:CreateToggle({ Name = "ESP others", Flag = "PE_PlayerESP",
@@ -3243,6 +3364,26 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_AuraFling",
         CurrentValue = CFG.AuraFling == true,
         Callback = function(v) CFG.AuraFling = v end })
+    C:CreateDropdown({
+        Name = "Fling direction",
+        Flag = "PE_FlingDirPick",
+        Options = { "Up", "Away from me", "Random" },
+        CurrentOption = { CFG.FlingDir },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG.FlingDir = picked end
+        end,
+    })
+    C:CreateToggle({ Name = "Infinite aura range (whole map)",
+        Flag = "PE_AuraInfRange",
+        CurrentValue = CFG.AuraInfRange == true,
+        Callback = function(v) CFG.AuraInfRange = v end })
+    C:CreateToggle({ Name = "Kill sound (death beep)",
+        Flag = "PE_KillSound",
+        CurrentValue = CFG.KillSound == true,
+        Callback = function(v) CFG.KillSound = v end })
     C:CreateToggle({ Name = "Burn targets (fire DOT)",
         Flag = "PE_AuraBurn",
         CurrentValue = CFG.AuraBurn ~= false,
@@ -3681,6 +3822,9 @@ G.PE_Stop = function()
     pcall(function() mainConn:Disconnect() end)
     pcall(function() itemConn:Disconnect() end)
     pcall(function() dangerConn:Disconnect() end)
+    pcall(function() chamsConn:Disconnect() end)
+    for _, h in pairs(byChams) do pcall(function() h:Destroy() end) end
+    byChams = setmetatable({}, { __mode = "k" })
     for k, h in pairs(byDanger) do pcall(function() h:Destroy() end) end
     byDanger = {}
     for plr, e in pairs(by) do
@@ -3718,10 +3862,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.40 stopped")
+    print("[PE] v2.41 stopped")
 end
 
-print("[PE] v2.40 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.41 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
