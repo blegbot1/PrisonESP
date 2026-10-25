@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.45
+--  PRISON ESP  v2.46
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -192,11 +192,14 @@ CFG.C00lTeam = pickOpt(CFG.C00lTeam, { "Everyone" }, "Everyone")
 -- на враге, просто не получится.
 CFG.FirePaint = CFG.FirePaint == true
 local paintAt = 0
--- АПОКАЛИПСИС: один тумблер = всё сразу. Игроки: урон + огонь всем;
--- карта: горит всё в радиусе 30 стадов от каждого игрока (стены,
--- полы, модельки) — огонь следует за движухой.
+-- АПОКАЛИПСИС = УБИВАЛКА: один тумблер делает всё сам —
+-- 1) команда СБЕЖАВШИЙ, 2) сам берёт M9, 3) телепорт высоко в небо
+-- (не достанут; дистанции урона нет — доказано), 4) все игроки
+-- получают 100 урона + огонь за тик. Выкл — возврат на землю.
+-- Горение частей карты сервер отвергает (проверка принадлежности) —
+-- жжём только игроков.
 CFG.Apocalypse = CFG.Apocalypse == true
-CFG.ApocDamage = tonumber(CFG.ApocDamage) or 10
+CFG.ApocDamage = tonumber(CFG.ApocDamage) or 100
 local apocAt = 0
 -- МГНОВЕННЫЙ РЕВАЙН: умер — сами шлём ResetToMenuEvent и возвращаемся
 -- в прошлую команду. Даунтайм ~1.5с вместо стандартного респавна.
@@ -2767,88 +2770,87 @@ local function auraTick()
         end
     end
 
-    -- АПОКАЛИПСИС: всё горит сразу. 1) Игроки — урон ApocDamage +
-    -- огонь. 2) Карта — все крупные части в 30 стадах от каждого
-    -- игрока получают огонь (носитель — ближайший враг, урон 1).
-    if CFG.Apocalypse and now - apocAt >= 1.2 then
-        apocAt = now
-        local remoteA = myGunRemote("InflictTarget")
-        if remoteA then
-            local rootA = LP.Character
-                and LP.Character:FindFirstChild("HumanoidRootPart")
-            -- Карта: собираем части вокруг живых игроков и себя.
-            local hot = {}
-            local hotN = 0
-            for _, p2 in ipairs(Players:GetPlayers()) do
-                local ch2 = p2.Character
-                local r2 = ch2 and ch2:FindFirstChild("HumanoidRootPart")
-                if r2 then
-                    local zone = workspace:GetPartBoundsInRadius(
-                        r2.Position, 30)
-                    for _, pt in ipairs(zone) do
-                        if hotN < 40 and not hot[pt]
-                           and pt.Size.X + pt.Size.Y + pt.Size.Z >= 8
-                           and not pt:IsA("Terrain") then
-                            hot[pt] = true
-                            hotN = hotN + 1
-                        end
-                    end
-                end
+    -- АПОКАЛИПСИС: автоматическая убивалка.
+    -- 1) Вышка: анкор себя +400 стадов вверх один раз при включении —
+    --    не достанут (сервер дистанцию урона не проверяет).
+    -- 2) Смена команды Prisoner<->Escaped каждую секунду: каждый игрок
+    --    по очереди становится врагом — серверный тим-чек обходим.
+    -- 3) Автоподбор M9, если пушки нет (гивер слетает на вышку).
+    -- 4) Урон 100 + огонь всем, тик 0.5с.
+    if CFG.Apocalypse then
+        local rootA = LP.Character
+            and LP.Character:FindFirstChild("HumanoidRootPart")
+        if rootA and not CFG._apocPerched then
+            CFG._apocPerched = true
+            pcall(function()
+                rootA.Anchored = true
+                rootA.CFrame = rootA.CFrame
+                    + Vector3.new(0, 400, 0)
+            end)
+            print("[PE APOC] perched 400 studs up - safe spot")
+        end
+        -- Смена команды раз в секунду.
+        if now - (CFG._apocTeamAt or 0) >= 1 then
+            CFG._apocTeamAt = now
+            CFG._apocTeamFlip = not CFG._apocTeamFlip
+            local rT = ReplicatedStorage:FindFirstChild("ChooseTeamEvent")
+            if rT then
+                pcall(function()
+                    rT:FireServer(CFG._apocTeamFlip and "Escaped"
+                        or "Prisoner")
+                end)
             end
-            -- Носитель: ближайший живой враг (без ForceField).
-            local carrier, carrierD
-            for _, p2 in ipairs(Players:GetPlayers()) do
-                if p2 ~= LP then
-                    local ch2 = p2.Character
-                    local h2 = ch2 and ch2:FindFirstChildOfClass("Humanoid")
-                    local r2 = ch2 and ch2:FindFirstChild("HumanoidRootPart")
-                    if ch2 and h2 and h2.Health > 0 and r2
-                       and not ch2:FindFirstChildOfClass("ForceField") then
-                        local d2 = rootA
-                            and (r2.Position - rootA.Position).Magnitude or 0
-                        if not carrierD or d2 < carrierD then
-                            carrier, carrierD = h2, d2
-                        end
-                    end
-                end
-            end
-            if carrier then
-                -- 1) Поджиг карты (частей — по 1 урона носителю... нет:
-                -- урон получает ГУМАНОИД носителя, части только горят).
-                for pt in pairs(hot) do
-                    pcall(function()
-                        remoteA:FireServer(carrier, pt, 1,
-                            Vector3.new(0, 1, 0), 0, 0, true)
-                    end)
-                end
-                -- 2) Игроки: урон ApocDamage + огонь всем.
+        end
+        -- Автоподбор M9.
+        if not myGunRemote("InflictTarget")
+           and os.clock() - (CFG._apocGiveAt or 0) > 6 then
+            CFG._apocGiveAt = os.clock()
+            G.PE.Give("M9")
+        end
+        -- Убийственный цикл: все, урон 100, огонь.
+        if now - apocAt >= 0.5 then
+            apocAt = now
+            local remoteA = myGunRemote("InflictTarget")
+            if remoteA then
                 local dmgA = math.clamp(
-                    tonumber(CFG.ApocDamage) or 10, 1, 20)
+                    tonumber(CFG.ApocDamage) or 100, 1, 200)
                 local hitsA = 0
                 for _, p2 in ipairs(Players:GetPlayers()) do
                     if p2 ~= LP and hitsA < 20 then
                         local ch2 = p2.Character
                         local h2 = ch2
                             and ch2:FindFirstChildOfClass("Humanoid")
-                        local r2 = ch2
-                            and ch2:FindFirstChild("HumanoidRootPart")
-                        if ch2 and h2 and h2.Health > 0 and r2
+                        local head2 = ch2
+                            and (ch2:FindFirstChild("Head")
+                                or ch2:FindFirstChild("HumanoidRootPart"))
+                        if ch2 and h2 and h2.Health > 0 and head2
                            and not ch2:FindFirstChildOfClass("ForceField") then
                             hitsA = hitsA + 1
                             local bt = PE_BURN_AT[p2]
                             local burnA = (not bt or now - bt > 1.5)
                             if burnA then PE_BURN_AT[p2] = now end
                             pcall(function()
-                                remoteA:FireServer(h2, r2, dmgA,
+                                remoteA:FireServer(h2, head2, dmgA,
                                     Vector3.new(0, 1, 0), 0, 0, burnA)
                             end)
                         end
                     end
                 end
-            elseif os.clock() - (CFG._noApocWarnAt or 0) > 10 then
-                CFG._noApocWarnAt = os.clock()
-                warn("[PE APOC] no enemy alive to carry the fire")
             end
+        end
+    else
+        -- Выключили: отанкориваем и возвращаемся на землю.
+        if CFG._apocPerched then
+            CFG._apocPerched = nil
+            local rootA = LP.Character
+                and LP.Character:FindFirstChild("HumanoidRootPart")
+            if rootA then
+                pcall(function()
+                    rootA.Anchored = false
+                    rootA.CFrame = rootA.CFrame - Vector3.new(0, 400, 0)
+                end)
+            end
+            print("[PE APOC] perch released, back to the ground")
         end
     end
 
@@ -3183,7 +3185,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.45",
+        LoadingSubtitle = "ESP + Combat v2.46",
         -- Сохранение настроек Rayfield: включаем только если в
         -- исполнителе есть файловая система (сам Rayfield проверит
         -- и предупредит, если нет). Наши дефолты живут в getgenv().
@@ -3322,7 +3324,8 @@ local okGUI, errGUI = pcall(function()
         ["Burn damage per tick"] = "Урон горения за тик",
         ["Who burns"] = "Кто горит",
         ["Fire paint (draw with fire at cursor)"] = "Огненная кисть (рисуй огнём курсором)",
-        ["APOCALYPSE (burn EVERYTHING)"] = "АПОКАЛИПСИС (жечь ВСЁ)",
+        ["APOCALYPSE (burn EVERYTHING)"] = "АПОКАЛИПСИС (убивалка)",
+        ["APOCALYPSE (auto killer machine)"] = "АПОКАЛИПСИС (машина-убийца)",
         ["Apocalypse damage"] = "Урон апокалипсиса",
         ["Decal image id (your photo)"] = "ID картинки (твоё фото)",
         ["REPLACE ALL TEXTURES (sky + every wall)"] = "ЗАМЕНИТЬ ВСЕ ТЕКСТУРЫ (небо + стены)",
@@ -3790,16 +3793,16 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_FirePaint",
         CurrentValue = CFG.FirePaint == true,
         Callback = function(v) CFG.FirePaint = v end })
-    C:CreateSection("APOCALYPSE (one button doom)")
+    C:CreateSection("APOCALYPSE (auto killer)")
     C:CreateParagraph({ Title = "Apocalypse",
-        Content = "ONE toggle: everything burns at once. All players take damage + fire every tick; every wall/floor/model within 30 studs of any player ignites too - the map burns wherever the action is. Needs a gun and at least one living enemy as fire carrier." })
-    C:CreateToggle({ Name = "APOCALYPSE (burn EVERYTHING)",
+        Content = "ONE toggle - the machine does everything: teleports you 400 studs UP and anchors (nobody reaches you), switches team Prisoner<->Escaped every second (everyone becomes a valid target in turn - server team-check bypassed), auto-takes the M9 pistol, then burns and deals 100 damage to EVERY player on the server every 0.5s. Toggle off - you are unanchored and lowered back." })
+    C:CreateToggle({ Name = "APOCALYPSE (auto killer machine)",
         Flag = "PE_Apocalypse",
         CurrentValue = CFG.Apocalypse == true,
         Callback = function(v) CFG.Apocalypse = v end })
     C:CreateSlider({ Name = "Apocalypse damage", Flag = "PE_ApocDamage",
-        Range = {1, 20}, Increment = 1,
-        CurrentValue = math.clamp(tonumber(CFG.ApocDamage) or 10, 1, 20),
+        Range = {1, 200}, Increment = 5,
+        CurrentValue = math.clamp(tonumber(CFG.ApocDamage) or 100, 1, 200),
         Callback = function(v) CFG.ApocDamage = v end })
 
     C:CreateSection("Team & status")
@@ -4262,16 +4265,27 @@ G.PE_Stop = function()
     G.PE.WP_Save, G.PE.WP_TP, G.PE.TPCrosshair = nil, nil, nil
     pcall(function() G.PE.FPSBoost(false) end)
     G.PE.FPSBoost = nil
+    pcall(function()
+        if CFG._apocPerched then
+            CFG._apocPerched = nil
+            local rootP2 = LP.Character
+                and LP.Character:FindFirstChild("HumanoidRootPart")
+            if rootP2 then
+                rootP2.Anchored = false
+                rootP2.CFrame = rootP2.CFrame - Vector3.new(0, 400, 0)
+            end
+        end
+    end)
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.45 stopped")
+    print("[PE] v2.46 stopped")
 end
 
-print("[PE] v2.45 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.46 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
