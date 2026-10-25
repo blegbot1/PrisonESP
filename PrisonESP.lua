@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.34
+--  PRISON ESP  v2.35
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -3127,12 +3127,143 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.34",
+        LoadingSubtitle = "ESP + Combat v2.35",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
         ConfigurationSaving = { Enabled = false },
     })
+
+    -- ЯЗЫК МЕНЮ: getgenv().PE_LANG = "en" | "ru" (переживает
+    -- перезапуск скрипта). Применяется при загрузке.
+    local PE_LANG = "en"
+    pcall(function()
+        if getgenv().PE_LANG == "ru" then PE_LANG = "ru" end
+    end)
+    local PE_RU = {
+        ["Roles"] = "Роли", ["Labels"] = "Подписи",
+        ["Boxes"] = "Коробки", ["Player visuals"] = "Визуалы игрока",
+        ["Minimap"] = "Миникарта", ["Ground items"] = "Предметы на земле",
+        ["Escape & danger zones"] = "Побег и опасные зоны",
+        ["Kill aura (InflictTarget)"] = "Килл-аура (InflictTarget)",
+        ["Cuffs & teleport"] = "Наручники и телепорт",
+        ["Gun upgrade"] = "Прокачка пушки",
+        ["Taser (stun)"] = "Тазер (стан)",
+        ["C00LKIDD MODE (2014)"] = "РЕЖИМ C00LKIDD (2014)",
+        ["Client aim (silent)"] = "Клиентский аим (сайлент)",
+        ["Team & status"] = "Команда и статус",
+        ["Movement"] = "Движение",
+        ["Weapon giver (click detectors)"] = "Выдача оружия (клик-детекторы)",
+        ["ESP guards"] = "ЕСП охраны", ["ESP prisoners"] = "ЕСП заключённых",
+        ["ESP criminals"] = "ЕСП преступников",
+        ["ESP others"] = "ЕСП остальных",
+        ["Admins highlight + alert"] = "Подсветка админов + алерт",
+        ["Names"] = "Имена", ["Distance"] = "Дистанция",
+        ["Role tags [GUARD]/[PRIS]/[CRIM]"] = "Теги роли [ОХР]/[ЗЕК]/[КРИМ]",
+        ["Weapon in hands"] = "Оружие в руках",
+        ["Name color by HP"] = "Цвет ника по HP",
+        ["ESP text size"] = "Размер текста ЕСП",
+        ["ESP range (0 = whole map)"] = "Дистанция ЕСП (0 = вся карта)",
+        ["Hide dead"] = "Скрывать мёртвых",
+        ["Player boxes"] = "Коробки игроков", ["Box style"] = "Стиль коробки",
+        ["Box thickness"] = "Толщина коробки",
+        ["Box transparency"] = "Прозрачность коробки",
+        ["Box padding (screen)"] = "Отступ на экране",
+        ["Box fade by distance"] = "Затухание по дистанции",
+        ["3D box margin (studs)"] = "Отступ 3D-коробки (стады)",
+        ["Skeleton ESP"] = "Скелет", ["Skeleton thickness"] = "Толщина скелета",
+        ["Skeleton: hide closer than"] = "Скелет: скрывать ближе чем",
+        ["Head frame"] = "Рамка головы",
+        ["Head frame size"] = "Размер рамки головы",
+        ["Head frame in role color"] = "Рамка в цвете роли",
+        ["HP bar above head"] = "Полоска HP над головой",
+        ["HP bar width"] = "Ширина полоски HP",
+        ["HP bar height"] = "Высота полоски HP",
+        ["HP bar gradient"] = "Градиент полоски HP",
+        ["HP in percent"] = "HP в процентах",
+        ["HP numbers on bar"] = "Цифры HP на полоске",
+        ["Snaplines to players"] = "Трейсеры к игрокам",
+        ["Snapline origin"] = "Начало трейсеров",
+        ["Off-screen arrows"] = "Стрелки за экраном",
+        ["Arrow thickness"] = "Толщина стрелок",
+        ["Arrow transparency"] = "Прозрачность стрелок",
+        ["Movement vector"] = "Вектор движения",
+        ["Ring under target"] = "Кольцо под целью",
+        ["Target speed"] = "Скорость цели",
+        ["Lite ESP mode (less load)"] = "Лёгкий режим ЕСП (меньше нагрузки)",
+        ["Minimap size"] = "Размер миникарты",
+        ["Self dot on minimap"] = "Своя точка на миникарте",
+        ["Guard color"] = "Цвет охраны",
+        ["Prisoner color"] = "Цвет заключённых",
+        ["Criminal color"] = "Цвет преступников",
+        ["Others color"] = "Цвет остальных",
+        ["Guns/keycards/ammo on ground"] = "Пушки/пропуска/патроны на земле",
+        ["Danger/escape zones ESP"] = "ЕСП зон побега и опасности",
+        ["AUTO-ESCAPE (tp to zone and back)"] = "АВТО-ПОБЕГ (тп на зону и назад)",
+        ["Kill aura"] = "Килл-аура", ["Aura radius"] = "Радиус ауры",
+        ["Damage per shot"] = "Урон за выстрел", ["Tick delay"] = "Задержка тика",
+        ["Who to hit"] = "Кого бить",
+        ["Lifesteal (heal self per hit)"] = "Вампиризм (хил за удар)",
+        ["Fling targets (mega knockback up)"] = "Подброс жертв (мега-отдача)",
+        ["Burn targets (fire DOT)"] = "Поджог целей (огонь по времени)",
+        ["Auto-burn attacker (retribution)"] = "Авто-сожжение атакующего",
+        ["Immortality (self-heal loop, 0 dmg)"] = "Бессмертие (хил-цикл, 0 урона)",
+        ["Victim (pick a player)"] = "Жертва (выбери игрока)",
+        ["TELEPORT to player (behind)"] = "ТЕЛЕПОРТ к игроку (за спину)",
+        ["CUFF player"] = "НАРУЧНИКИ на игрока",
+        ["TELEPORT + CUFF (combo)"] = "ТЕЛЕПОРТ + НАРУЧНИКИ (комбо)",
+        ["Cuff aura (nearest enemy)"] = "Аура наручников (ближний враг)",
+        ["Who to cuff"] = "Кого сковывать",
+        ["Upgrade damage"] = "Урон прокачки",
+        ["Gun lifesteal (heal per legit shot)"] = "Вампиризм пушки (хил за выстрел)",
+        ["Sniper scope on any gun (E key)"] = "Прицел на любой пушке (клавиша E)",
+        ["Ammo hack: 1e9 clip via real reload (test)"] = "Хак патронов: 1e9 через перезарядку (тест)",
+        ["Headshot multiplier"] = "Множитель хедшота",
+        ["Burst bullets per click"] = "Пуль за клик (очередь)",
+        ["Shotgun mode (pellets per shot)"] = "Режим дробовика (пуль за выстрел)",
+        ["Shotgun pellets"] = "Картечин дробовика",
+        ["Explosive bullets (AoE)"] = "Взрывные пули (по площади)",
+        ["Explosion radius"] = "Радиус взрыва",
+        ["Burning bullets (ignite)"] = "Горящие пули (поджог)",
+        ["Knockback (fling victims)"] = "Отдача (подброс жертв)",
+        ["Piercing (through bodies)"] = "Прошивание (сквозь тела)",
+        ["UPGRADE gun in hands"] = "ПРОКАЧАТЬ пушку в руках",
+        ["Auto-upgrade (equip/respawn)"] = "Авто-прокачка (экип/респавн)",
+        ["Taser aura (stun everyone near)"] = "Аура тазера (стан всех рядом)",
+        ["Taser delay"] = "Задержка тазера",
+        ["Who to tase"] = "Кого станить",
+        ["TASE selected player (x3)"] = "ТАЗЕР по выбранному (x3)",
+        ["Slow burn EVERYONE (server-wide fire)"] = "Сожжение ВСЕХ (огонь на весь сервер)",
+        ["Burn damage per tick"] = "Урон горения за тик",
+        ["Who burns"] = "Кто горит",
+        ["Decal image id (your photo)"] = "ID картинки (твоё фото)",
+        ["REPLACE ALL TEXTURES (sky + every wall)"] = "ЗАМЕНИТЬ ВСЕ ТЕКСТУРЫ (небо + стены)",
+        ["RESTORE textures"] = "ВОССТАНОВИТЬ текстуры",
+        ["Silent aim (crosshair target, walls)"] = "Сайлент-аим (цель у прицела, сквозь стены)",
+        ["Aim FOV radius (px)"] = "Радиус захвата аима (px)",
+        ["Aim shot rate"] = "Скорость выстрелов аима",
+        ["Who to aim at"] = "Кого целить",
+        ["Team: GUARD"] = "Команда: ОХРАНА",
+        ["Team: PRISONER"] = "Команда: ЗАКЛЮЧЁННЫЙ",
+        ["Team: ESCAPED (criminal)"] = "Команда: ПОБЕГ (преступник)",
+        ["Reset to menu (escape cuffs)"] = "Сброс в меню (снять наручники)",
+        ["Fast respawn (instant rejoin)"] = "Быстрый респавн (мгновенный возврат)",
+        ["Anti-stun (taser/cuffs/ragdoll)"] = "Анти-стан (тазер/наручники/регдолл)",
+        ["Auto-give after death"] = "Авто-выдача после смерти",
+        ["Auto-give weapon"] = "Оружие для авто-выдачи",
+        ["GIVE ALL (guns + KeyCard)"] = "ВЫДАТЬ ВСЁ (пушки + пропуск)",
+        ["Give: "] = "Выдать: ",
+        ["Open ALL doors (jail cells)"] = "Открыть ВСЕ двери (камеры)",
+        ["Gun source -> console (decompile)"] = "Исходник пушки -> консоль (декомпил)",
+        ["Kill aura"] = "Килл-аура", ["Taser"] = "Тазер",
+        ["Upgrade"] = "Прокачка", ["Giver"] = "Гивер",
+        ["Zones"] = "Зоны", ["Items"] = "Предметы",
+        ["Silent aim"] = "Сайлент-аим", ["Lbl"] = "Подпись",
+    }
+    local function peTr(s)
+        if PE_RU[s] then return PE_RU[s] end
+        return s
+    end
 
     -- Каждый элемент в своём pcall: на части исполнителей один
     -- неудачный Create* ронял ВСЮ сборку меню — окно оставалось
@@ -3145,7 +3276,21 @@ local okGUI, errGUI = pcall(function()
                 local v = tabObj[k]
                 if type(v) ~= "function" then return v end
                 return function(_, ...)
-                    local ok, res = pcall(v, tabObj, ...)
+                    local args = { ... }
+                    -- Переводим подписи на лету (только RU-режим).
+                    if PE_LANG == "ru" then
+                        if type(args[1]) == "table" then
+                            if type(args[1].Name) == "string" then
+                                args[1].Name = peTr(args[1].Name)
+                            end
+                            if type(args[1].Title) == "string" then
+                                args[1].Title = peTr(args[1].Title)
+                            end
+                        elseif type(args[1]) == "string" then
+                            args[1] = peTr(args[1])
+                        end
+                    end
+                    local ok, res = pcall(v, tabObj, unpack(args))
                     if not ok then
                         warn("[PE GUI] " .. tabName .. "." .. tostring(k)
                             .. ": " .. tostring(res))
@@ -3702,6 +3847,49 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.Doors() end })
     C:CreateButton({ Name = "Gun source -> console (decompile)",
         Callback = function() G.PE.GunSource() end })
+    -- ====================== ВКЛАДКА НАСТРОЙКИ ======================
+    local ST = safeNewTab(W, "Settings", "settings", "Settings")
+    if ST then
+        ST:CreateSection("Language / Язык")
+        ST:CreateParagraph({ Title = "Language",
+            Content = "Pick a language and press RESTART - the script reloads itself with the translated menu. EN: labels in English. RU: подписи меню на русском. Language survives script restarts." })
+        ST:CreateDropdown({
+            Name = "Menu language / Язык меню",
+            Flag = "PE_LANGPick",
+            Options = { "English", "Русский" },
+            CurrentOption = {
+                PE_LANG == "ru" and "Русский" or "English" },
+            MultipleOptions = false,
+            Callback = function(selected)
+                local picked = selected
+                if type(picked) == "table" then picked = picked[1] end
+                if picked == "Русский" then
+                    getgenv().PE_LANG = "ru"
+                else
+                    getgenv().PE_LANG = "en"
+                end
+                print("[PE] language = " .. tostring(picked)
+                    .. " - press RESTART SCRIPT to apply")
+            end,
+        })
+        ST:CreateButton({ Name = "RESTART SCRIPT (apply language)",
+            Callback = function()
+                print("[PE] restarting with new language...")
+                loadstring(game:HttpGet(
+                    "https://raw.githubusercontent.com/blegbot1/PrisonESP/main/PrisonESP.lua",
+                    true))()
+            end })
+        ST:CreateButton({ Name = "UNLOAD script (full cleanup)",
+            Callback = function()
+                print("[PE] unloading...")
+                local stop = G.PE_Stop
+                if stop then stop() end
+            end })
+        ST:CreateSection("Info")
+        ST:CreateParagraph({ Title = "Version",
+            Content = "PRISON ESP v2.35. ESP + Combat. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.TeamOf(name), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.Tase(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo(), PE.TexAll(), PE.TexRestore()." })
+    end
+
     guiOK = true
 end)
 if not okGUI then
@@ -3961,10 +4149,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.34 stopped")
+    print("[PE] v2.35 stopped")
 end
 
-print("[PE] v2.34 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.35 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
