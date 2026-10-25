@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.27
+--  PRISON ESP  v2.28
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -200,6 +200,17 @@ CFG.Immortal = CFG.Immortal == true
 -- КУЛЛ-ГАЙ-РЕЖИМ: то же самое, но с поджогом СЕБЯ (FlamingBullet).
 -- Огонь вешает сервер => ВИДЯТ ВСЕ; урон огня перекрыт хилом.
 CFG.ImmortalBurn = CFG.ImmortalBurn == true
+-- C00LKIDD MODE (2014): медленное сожжение ВСЕХ — крошечный урон
+-- + серверный огонь => все горят и «по тихоньку» умирают. Замена
+-- текстур (небо + декали) на любую картинку — только у тебя на
+-- экране (FE-эпоха), горение — глобальное.
+CFG.C00lMode = CFG.C00lMode == true
+CFG.C00lDamage = tonumber(CFG.C00lDamage) or 3
+CFG.C00lTeam = pickOpt(CFG.C00lTeam, {
+    "Everyone", "Except my team", "Only my team",
+    "Enemies (guards vs prisoners)", "Only guards", "Only prisoners" },
+    "Everyone")
+CFG.TexID = tostring(CFG.TexID or "")
 
 local STOPPED = false
 local Rayfield
@@ -1930,6 +1941,77 @@ G.PE.GiveAll = function()
 end
 
 -- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
+-- ЗАМЕНА ТЕКСТУР (локально): небо + все декали/текстуры -> любая
+-- картинка по decal id. Восстановление хранит оригиналы.
+local PE_TEX_ORIG = setmetatable({}, { __mode = "k" })
+local PE_TEX_SKY_MADE = false
+G.PE.TexAll = function()
+    local id = tostring(CFG.TexID or ""):gsub("%D", "")
+    if id == "" then
+        print("[PE TEX] paste a decal image id first (any image!)")
+        return
+    end
+    local asset = "rbxassetid://" .. id
+    local n = 0
+    local sky = game:GetService("Lighting"):FindFirstChildOfClass("Sky")
+    if not sky then
+        local ok, ns = pcall(function()
+            local s = Instance.new("Sky")
+            s.Parent = game:GetService("Lighting")
+            return s
+        end)
+        if ok and ns then
+            sky = ns
+            PE_TEX_SKY_MADE = true
+        end
+    end
+    if sky then
+        if PE_TEX_ORIG[sky] == nil then PE_TEX_ORIG[sky] = {} end
+        for _, f in ipairs({ "SkyboxBk", "SkyboxDn", "SkyboxFt",
+            "SkyboxLf", "SkyboxRt", "SkyboxUp" }) do
+            if PE_TEX_ORIG[sky][f] == nil then
+                PE_TEX_ORIG[sky][f] = sky[f]
+            end
+            pcall(function() sky[f] = asset end)
+            n = n + 1
+        end
+    end
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if (d:IsA("Decal") or d:IsA("Texture")) and d.Texture ~= "" then
+            if PE_TEX_ORIG[d] == nil then
+                PE_TEX_ORIG[d] = d.Texture
+            end
+            pcall(function() d.Texture = asset end)
+            n = n + 1
+        end
+    end
+    print("[PE TEX] " .. n .. " textures -> " .. asset
+        .. " (visible ONLY to you)")
+end
+G.PE.TexRestore = function()
+    local n = 0
+    for obj, v in pairs(PE_TEX_ORIG) do
+        if typeof(obj) == "Instance" and obj.Parent then
+            if obj:IsA("Sky") and type(v) == "table" then
+                for f, val in pairs(v) do
+                    pcall(function() obj[f] = val end)
+                    n = n + 1
+                end
+            elseif type(v) == "string" then
+                pcall(function() obj.Texture = v end)
+                n = n + 1
+            end
+        end
+    end
+    if PE_TEX_SKY_MADE then
+        local sky = game:GetService("Lighting"):FindFirstChildOfClass("Sky")
+        if sky then pcall(function() sky:Destroy() end) end
+        PE_TEX_SKY_MADE = false
+    end
+    PE_TEX_ORIG = setmetatable({}, { __mode = "k" })
+    print("[PE TEX] restored " .. n .. " textures")
+end
+
 G.PE.ShopInfo = function()
     local f = ReplicatedStorage:FindFirstChild("ShopRemotes")
     local g = f and f:FindFirstChild("GetShopInfo")
@@ -2357,6 +2439,7 @@ local stunAt = 0
 local modAt = 0
 local silentAt = 0
 local immortalAt = 0
+local c00lAt = 0
 
 -- Зажатие ЛКМ для клиентского аима.
 local PE_MOUSE_DOWN = false
@@ -2552,6 +2635,50 @@ local function auraTick()
         elseif os.clock() - (CFG._noTaserWarnAt or 0) > 10 then
             CFG._noTaserWarnAt = os.clock()
             warn("[PE] taser aura: no Taser tool (switch to GUARD)")
+        end
+    end
+
+    -- C00LKIDD MODE: медленно сжигаем всех — крошечный урон каждый
+    -- тик + серверный огонь раз в 2с. Все горят и умирают медленно.
+    if CFG.C00lMode and now - c00lAt >= 1.2 then
+        c00lAt = now
+        local remoteC = myGunRemote("InflictTarget")
+        if remoteC then
+            local myRootC = LP.Character
+                and LP.Character:FindFirstChild("HumanoidRootPart")
+            local hitC = 0
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LP and hitC < 12 then
+                    local ch = p.Character
+                    local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+                    local root = ch and ch:FindFirstChild("HumanoidRootPart")
+                    if ch and hum and hum.Health > 0 and root
+                       and not ch:FindFirstChildOfClass("ForceField")
+                       and targetAllowed(p, CFG.C00lTeam or "Everyone",
+                           LP.Team) then
+                        local bt = PE_BURN_AT[p]
+                        local burnC = (not bt or now - bt > 2)
+                        if burnC then PE_BURN_AT[p] = now end
+                        hitC = hitC + 1
+                        local dir = Vector3.new(0, 1, 0)
+                        if myRootC then
+                            local delta = root.Position - myRootC.Position
+                            if delta.Magnitude > 0.01 then
+                                dir = delta.Unit
+                            end
+                        end
+                        pcall(function()
+                            remoteC:FireServer(hum, root,
+                                math.clamp(tonumber(CFG.C00lDamage) or 3,
+                                    1, 20),
+                                dir, 0, 0, burnC)
+                        end)
+                    end
+                end
+            end
+        elseif os.clock() - (CFG._noGunWarnAt or 0) > 10 then
+            CFG._noGunWarnAt = os.clock()
+            warn("[PE] c00lkidd: no gun with InflictTarget")
         end
     end
 
@@ -2796,7 +2923,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.27",
+        LoadingSubtitle = "ESP + Combat v2.28",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3274,6 +3401,41 @@ local okGUI, errGUI = pcall(function()
     C:CreateButton({ Name = "TASE selected player (x3)",
         Callback = function() G.PE.Tase(CFG._target) end })
 
+    C:CreateSection("C00LKIDD MODE (2014)")
+    C:CreateParagraph({ Title = "c00lkidd",
+        Content = "Slow-burn EVERYONE: tiny damage every 1.2s + server fire - players burn and die slowly, visible to the whole server (needs a gun). Texture swap: paste ANY decal image id (your own photo - upload it to Roblox as a decal first) and the sky + all decals become that image - local-only, just for your screen, the burn is global. The 2014 legend returns." })
+    C:CreateToggle({ Name = "Slow burn EVERYONE (server-wide fire)",
+        Flag = "PE_C00lMode",
+        CurrentValue = CFG.C00lMode == true,
+        Callback = function(v) CFG.C00lMode = v end })
+    C:CreateSlider({ Name = "Burn damage per tick", Flag = "PE_C00lDamage",
+        Range = {1, 20}, Increment = 1,
+        CurrentValue = math.clamp(tonumber(CFG.C00lDamage) or 3, 1, 20),
+        Callback = function(v) CFG.C00lDamage = v end })
+    C:CreateDropdown({
+        Name = "Who burns",
+        Flag = "PE_C00lTeamPick",
+        Options = { "Everyone", "Except my team", "Only my team",
+            "Enemies (guards vs prisoners)", "Only guards",
+            "Only prisoners" },
+        CurrentOption = { CFG.C00lTeam },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG.C00lTeam = picked end
+        end,
+    })
+    C:CreateInput({ Name = "Decal image id (your photo)",
+        PlaceholderText = "e.g. 123456789",
+        CurrentValue = tostring(CFG.TexID or ""),
+        Flag = "PE_TexID",
+        Callback = function(text) CFG.TexID = tostring(text) end })
+    C:CreateButton({ Name = "REPLACE ALL TEXTURES (sky + decals)",
+        Callback = function() G.PE.TexAll() end })
+    C:CreateButton({ Name = "RESTORE textures",
+        Callback = function() G.PE.TexRestore() end })
+
     C:CreateSection("Fake shots (visual only)")
     C:CreateParagraph({ Title = "Fake shots",
         Content = "Sends a bullet tracer through the server's VisualizeBullet relay - everyone sees you shooting, zero damage. Button aims at the selected player, the G keybind fires at your mouse cursor. Needs a gun in hands." })
@@ -3581,6 +3743,8 @@ G.PE_Stop = function()
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
     G.PE.Escape = nil
     G.PE.WearOutfit, G.PE.ShopInfo = nil, nil
+    pcall(function() G.PE.TexRestore() end)
+    G.PE.TexAll, G.PE.TexRestore = nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     G.PE.Tase = nil
     G.PE.FakeShot = nil
@@ -3590,10 +3754,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.27 stopped")
+    print("[PE] v2.28 stopped")
 end
 
-print("[PE] v2.27 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.28 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"

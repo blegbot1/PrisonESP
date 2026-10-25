@@ -1,0 +1,47 @@
+total: 46
+1. BindableFunction | PlayEmote | ctx: RunAnim < walk < WalkAnim < ScaleDampeningPercent
+2. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+3. BindableFunction | PlayEmote | ctx: JumpAnim < climb < ClimbAnim < ScaleDampeningPercent
+4. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+5. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+6. BindableFunction | PlayEmote | ctx: JumpAnim < run < RunAnim < ScaleDampeningPercent
+7. BindableFunction | PlayEmote | ctx: Animation2 < Weight < Animation1 < Weight
+8. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+9. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+10. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+11. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+12. BindableEvent | Visualize | ctx: BulletVisualizerScript
+13. RemoteEvent | InflictTarget | ctx: GunScript_Server < IgniteScript < Duration < creator
+14. RemoteEvent | ChangeAmmoAndClip | ctx: IgniteScript < Duration < creator < InflictTarget
+15. RemoteEvent | VisualizeBullet | ctx: Ammo < Clips < Setting
+16. RemoteEvent | casing | ctx: Model < gnisac < daoler
+17. RemoteEvent | reload | ctx: Model < gnisac < daoler < casing
+18. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+19. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+20. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+21. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+22. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+23. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+24. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+25. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+26. RemoteEvent | RemoteEvent | ctx: LocalScript < Main < GetTasedBro < Sound
+27. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+28. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+29. RemoteEvent | SprintRemote | ctx: HumanoidRootPart < RootJoint < RootAttachment < SprintRemotes
+30. RemoteFunction | GetBannedPlayers | ctx: RootJoint < RootAttachment < SprintRemotes < SprintRemote
+31. RemoteEvent | AdminCommandBarEvent | ctx: RootAttachment < SprintRemotes < SprintRemote < GetBannedPlayers
+32. RemoteEvent | PrivateWarning | ctx: SprintRemotes < SprintRemote < GetBannedPlayers < AdminCommandBarEvent
+33. RemoteEvent | SpectateEvent | ctx: SprintRemote < GetBannedPlayers < AdminCommandBarEvent < PrivateWarning
+34. RemoteEvent | GameMessageRemote | ctx: GetBannedPlayers < AdminCommandBarEvent < PrivateWarning < SpectateEvent
+35. RemoteEvent | CuffUiEvent | ctx: AdminCommandBarEvent < PrivateWarning < SpectateEvent < GameMessageRemote
+36. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+37. BindableFunction | PlayEmote | ctx: SitAnim < ScaleDampeningPercent < fall < FallAnim
+38. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+39. BindableFunction | PlayEmote | ctx: fall < FallAnim < sit < SitAnim
+40. RemoteEvent | GlobalAnnouncement | ctx: HairAttachment < face < Mesh
+41. RemoteFunction | GetShopInfo | ctx: face < Mesh < GlobalAnnouncement < ShopRemotes
+42. RemoteEvent | CriminalStatusRemote | ctx: Mesh < GlobalAnnouncement < ShopRemotes < GetShopInfo
+43. RemoteEvent | PrisonAnnouncementEvent | ctx: GlobalAnnouncement < ShopRemotes < GetShopInfo < CriminalStatusRemote
+44. RemoteEvent | PowerMessageEvent | ctx: ShopRemotes < GetShopInfo < CriminalStatusRemote < PrisonAnnouncementEvent
+45. RemoteEvent | ResetToMenuEvent | ctx: GetShopInfo < CriminalStatusRemote < PrisonAnnouncementEvent < PowerMessageEvent
+46. RemoteEvent | ChooseTeamEvent | ctx: CriminalStatusRemote < PrisonAnnouncementEvent < PowerMessageEvent < ResetToMenuEvent
