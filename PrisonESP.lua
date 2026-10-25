@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.16
+--  PRISON ESP  v2.17
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -166,10 +166,12 @@ CFG.TaserTeam = pickOpt(CFG.TaserTeam, {
     "Everyone", "Except my team",
     "Enemies (guards vs prisoners)", "Only guards", "Only prisoners" },
     "Except my team")
+-- ОПАСНЫЕ ЗОНЫ: Death Part подсветка + телепорт к зоне побега.
+CFG.DangerESP = CFG.DangerESP == true
 
 local STOPPED = false
 local Rayfield
-local mainConn, itemConn, auraConn
+local mainConn, itemConn, auraConn, dangerConn
 local by = {}          -- [Player] = {char, gui, lbl, box, role, vis, roleAt}
 
 -- ============================================================
@@ -1486,6 +1488,60 @@ itemConn = RunService.Heartbeat:Connect(function()
     end)
 end)
 
+-- ОПАСНЫЕ ЗОНЫ: Death Part (убивает нас) и EscapePart (побег)
+-- подсвечиваем через Highlight.
+local DANGER_COLORS = {
+    ["Death Part"] = Color3.fromRGB(255, 60, 60),
+    EscapePart     = Color3.fromRGB(120, 255, 140),
+}
+local byDanger = {}
+local dangerScanAt = 0
+dangerConn = RunService.Heartbeat:Connect(function()
+    if STOPPED then return end
+    if not CFG.DangerESP then
+        for k, h in pairs(byDanger) do
+            pcall(function() h:Destroy() end)
+            byDanger[k] = nil
+        end
+        return
+    end
+    local now = os.clock()
+    if now - dangerScanAt < 2 then return end
+    dangerScanAt = now
+    pcall(function()
+        local seen = {}
+        for _, m in ipairs(workspace:GetDescendants()) do
+            if m:IsA("BasePart") and DANGER_COLORS[m.Name] then
+                seen[m] = true
+                local h = byDanger[m]
+                if not h or not h.Parent then
+                    local ok, nh = pcall(function()
+                        return Instance.new("Highlight") end)
+                    if ok and nh then
+                        nh.Adornee = m
+                        nh.Parent = m
+                        nh.FillTransparency = 0.45
+                        byDanger[m] = nh
+                        h = nh
+                    end
+                end
+                if h then
+                    local col = DANGER_COLORS[m.Name]
+                    h.FillColor = col
+                    h.OutlineColor = col
+                    h.Enabled = true
+                end
+            end
+        end
+        for k, h in pairs(byDanger) do
+            if not seen[k] or not k.Parent then
+                pcall(function() h:Destroy() end)
+                byDanger[k] = nil
+            end
+        end
+    end)
+end)
+
 -- ============================================================
 --  РАЗВЕДКА: ТТХ пушек, список ремоутов, зонд.
 -- ============================================================
@@ -1764,6 +1820,31 @@ G.PE.GiveAll = function()
 end
 
 -- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
+G.PE.Escape = function()
+    local root = LP.Character
+        and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not root then
+        print("[PE ESCAPE] no character")
+        return
+    end
+    local best, bestD
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("BasePart") and d.Name == "EscapePart" then
+            local dd = (d.Position - root.Position).Magnitude
+            if not bestD or dd < bestD then best, bestD = d, dd end
+        end
+    end
+    if not best then
+        print("[PE ESCAPE] no EscapePart on the map")
+        return
+    end
+    pcall(function()
+        root.CFrame = best.CFrame + Vector3.new(0, 4, 0)
+    end)
+    print("[PE ESCAPE] teleported to escape zone ("
+        .. math.floor(bestD or 0) .. " studs)")
+end
+
 G.PE.Doors = function()
     if type(fireclickdetector) ~= "function" then
         warn("[PE DOORS] no fireclickdetector")
@@ -2315,7 +2396,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.16",
+        LoadingSubtitle = "ESP + Combat v2.17",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2546,6 +2627,14 @@ local okGUI, errGUI = pcall(function()
     M:CreateToggle({ Name = "Guns/keycards/ammo on ground", Flag = "PE_Items",
         CurrentValue = CFG.Items ~= false,
         Callback = function(v) CFG.Items = v end })
+    M:CreateSection("Escape & danger zones")
+    M:CreateParagraph({ Title = "Zones",
+        Content = "Red = Death Part (kills you on touch), green = EscapePart (prisoner escape). Teleport puts you right on the nearest escape zone." })
+    M:CreateToggle({ Name = "Danger/escape zones ESP", Flag = "PE_DangerESP",
+        CurrentValue = CFG.DangerESP == true,
+        Callback = function(v) CFG.DangerESP = v end })
+    M:CreateButton({ Name = "TELEPORT to escape zone",
+        Callback = function() G.PE.Escape() end })
 
     -- ====================== ВКЛАДКА БОЙ ======================
     local C = safeNewTab(W, "Combat", "swords", "Combat")
@@ -2967,6 +3056,9 @@ G.PE_Stop = function()
     STOPPED = true
     pcall(function() mainConn:Disconnect() end)
     pcall(function() itemConn:Disconnect() end)
+    pcall(function() dangerConn:Disconnect() end)
+    for k, h in pairs(byDanger) do pcall(function() h:Destroy() end) end
+    byDanger = {}
     for plr, e in pairs(by) do
         if e then
             if e.gui then pcall(function() e.gui:Destroy() end) end
@@ -2988,6 +3080,7 @@ G.PE_Stop = function()
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
+    G.PE.Escape = nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     G.PE.Tase = nil
     local rfOld = Rayfield
@@ -2996,10 +3089,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.16 stopped")
+    print("[PE] v2.17 stopped")
 end
 
-print("[PE] v2.16 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.17 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
