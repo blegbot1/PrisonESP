@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.20
+--  PRISON ESP  v2.21
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -157,6 +157,7 @@ CFG.GunPellets = tonumber(CFG.GunPellets) or 8
 CFG.GunBurst = tonumber(CFG.GunBurst) or 10
 CFG.GunExplosive = CFG.GunExplosive ~= false
 CFG.GunBoomRadius = tonumber(CFG.GunBoomRadius) or 25
+CFG.GunLifesteal = CFG.GunLifesteal ~= false
 -- ТАЗЕР: клиент шлёт Taser.RemoteEvent:FireServer(ПОЗИЦИЯ) — сервер
 -- станит того, кто стоит у позиции. 5-секундный кулдаун в клиенте —
 -- шлём напрямую и без него.
@@ -1153,7 +1154,12 @@ local PE_CREATOR_ID = 0
 pcall(function() PE_CREATOR_ID = tonumber(game.CreatorId) or 0 end)
 local function isAdminP(p)
     if PE_ADMINS[p.UserId] then return true end
-    return PE_CREATOR_ID ~= 0 and p.UserId == PE_CREATOR_ID
+    if PE_CREATOR_ID == 0 then return false end
+    -- Если игру паблишила группа, CreatorId — id ГРУППЫ, а не человека:
+    -- совпадение с UserId игрока = ложный флаг.
+    local ok, ct = pcall(function() return game.CreatorType end)
+    if ok and ct == Enum.CreatorType.Group then return false end
+    return p.UserId == PE_CREATOR_ID
 end
 
 local function nameHasRole(n, list)
@@ -1770,7 +1776,8 @@ G.PE.Hit = function(namePart, partName)
         .. " (exact signature, damage " .. (tonumber(CFG.KillAuraDamage) or 50)
         .. "). WATCH TARGET HP!")
     pcall(function()
-        remote:FireServer(hum, root, tonumber(CFG.KillAuraDamage) or 50,
+        remote:FireServer(hum, root,
+            math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 5000),
             Vector3.new(0, 0, 1), 0, false, false)
     end)
 end
@@ -1995,7 +2002,8 @@ end
 -- ПРОКАЧКА ПУШКИ: Setting-модуль общий с GunScript_Local (require-кеш),
 -- правки видны игре сразу — «легитные» выстрелы бьют сильнее.
 G.PE.ModGun = function(dmg)
-    dmg = tonumber(dmg) or tonumber(CFG.ModGunDamage) or 250
+    dmg = math.clamp(tonumber(dmg) or tonumber(CFG.ModGunDamage) or 250,
+        10, 2000)
     local chr = LP.Character
     local tool = chr and chr:FindFirstChildOfClass("Tool")
     if not tool or not tool:FindFirstChild("Setting") then
@@ -2009,36 +2017,39 @@ G.PE.ModGun = function(dmg)
     end
     S.BaseDamage = dmg
     S.HeadshotEnabled = true
-    S.HeadshotDamageMultiplier = tonumber(CFG.GunHeadshot) or 500
+    S.HeadshotDamageMultiplier = math.clamp(
+        tonumber(CFG.GunHeadshot) or 500, 2, 200)
     S.Auto = true
     S.FireRate = 0.05
-    S.BurstRate = 0.05
     S.ReloadTime = 0.5
     S.Spread = 0
-    S.Piercing = tonumber(CFG.GunPiercing) or 5
+    S.Piercing = math.clamp(tonumber(CFG.GunPiercing) or 5, 0, 10)
     S.DelayBeforeFiring = 0
     S.DelayAfterFiring = 0
     S.CameraShakingEnabled = false
     S.LimitedClipEnabled = false
     -- Горящие пули: поджигает цель (серверный IgniteScript).
     S.FlamingBullet = CFG.GunFire == true
-    -- Отдача: подбрасывает жертву.
-    S.Knockback = tonumber(CFG.GunKnockback) or 0
+    -- Отдача: подбрасывает жертву (потолок — не палимся).
+    S.Knockback = math.min(tonumber(CFG.GunKnockback) or 0, 20000)
     -- Дробовик: N пуль за выстрел (урон умножается).
     if CFG.GunShotgun then
         S.ShotgunEnabled = true
-        S.BulletPerShot = tonumber(CFG.GunPellets) or 8
+        S.BulletPerShot = math.clamp(tonumber(CFG.GunPellets) or 8, 2, 16)
     end
-    -- Очередь: N пуль за клик.
+    -- Очередь: N пуль за клик (0 быть не может — кит замолчит).
     S.BurstFireEnabled = true
-    S.BulletPerBurst = tonumber(CFG.GunBurst) or 10
+    S.BulletPerBurst = math.clamp(tonumber(CFG.GunBurst) or 10, 1, 15)
     S.BurstRate = 0.03
-    -- Взрывные пули: урон по площади.
+    -- Взрывные пули: урон по площади. Взрыв × дробовик × очередь =
+    -- сотни серверных взрывов за клик — гасим множители.
     if CFG.GunExplosive then
         S.ExplosiveEnabled = true
-        S.Radius = tonumber(CFG.GunBoomRadius) or 25
+        S.Radius = math.clamp(tonumber(CFG.GunBoomRadius) or 25, 5, 60)
+        S.BulletPerShot = 1
+        S.BulletPerBurst = math.min(S.BulletPerBurst, 3)
     end
-    S.Lifesteal = CFG.AuraLifesteal and 1000 or 0
+    S.Lifesteal = CFG.GunLifesteal ~= false and 1000 or 0
     pcall(function() tool:SetAttribute("PE_Marked", true) end)
     print("[PE MOD] " .. tool.Name .. " upgraded: damage " .. dmg
         .. ", headshot x" .. (tonumber(CFG.GunHeadshot) or 500)
@@ -2154,6 +2165,8 @@ local cuffAt = 0
 local taserAt = 0
 local stunAt = 0
 local modAt = 0
+-- Троттлы на игрока: поджог/подброс/тазер (анти-«суперчеловек»-палитво).
+local PE_BURN_AT, PE_FLING_AT, PE_TASE_AT = {}, {}, {}
 local function auraTick()
     local now = os.clock()
 
@@ -2210,7 +2223,8 @@ local function auraTick()
 
     -- ТАЗЕР-АУРА: шлём позиции врагов в Taser.RemoteEvent — сервер
     -- станит того, кто у позиции. Радиус = радиусу килл-ауры.
-    if CFG.TaserAura and now - taserAt >= (tonumber(CFG.TaserDelay) or 0.7) then
+    if CFG.TaserAura and now - taserAt >= math.max(0.3,
+        tonumber(CFG.TaserDelay) or 0.7) then
         taserAt = now
         local t, ev = findTaser()
         if t and ev then
@@ -2228,8 +2242,16 @@ local function auraTick()
                                CFG.TaserTeam or "Except my team", LP.Team)
                            and (r4.Position - rootT.Position).Magnitude
                                <= (tonumber(CFG.KillAuraRadius) or 40) then
-                            fired = fired + 1
-                            pcall(function() ev:FireServer(r4.Position) end)
+                            -- Не чаще 2.5 с на игрока: у честного клиента
+                            -- кулдаун 5 с, суперчастота = флаг админам.
+                            local lt = PE_TASE_AT[p]
+                            if not lt or now - lt > 2.5 then
+                                PE_TASE_AT[p] = now
+                                fired = fired + 1
+                                pcall(function()
+                                    ev:FireServer(r4.Position)
+                                end)
+                            end
                         end
                     end
                 end
@@ -2300,7 +2322,8 @@ local function auraTick()
     end
 
     if not CFG.KillAura then return end
-    if now - auraAt < (tonumber(CFG.KillAuraDelay) or 0.15) then return end
+    if now - auraAt < math.max(0.1,
+        tonumber(CFG.KillAuraDelay) or 0.15) then return end
     auraAt = now
     local myRoot = LP.Character
         and LP.Character:FindFirstChild("HumanoidRootPart")
@@ -2323,7 +2346,8 @@ local function auraTick()
             local ch = p.Character
             local hum = ch and ch:FindFirstChildOfClass("Humanoid")
             local root = ch and ch:FindFirstChild("HumanoidRootPart")
-            if ch and hum and hum.Health > 0 and root then
+            if ch and hum and hum.Health > 0 and root
+               and not ch:FindFirstChildOfClass("ForceField") then
                 -- «Выбранный игрок»: бьём только цель из списка,
                 -- без ограничения дистанции.
                 local isSel = (mode == "Selected player"
@@ -2335,28 +2359,46 @@ local function auraTick()
                         and targetAllowed(p, mode, myTeam))
                 if ok then
                     hits = hits + 1
-                    -- ТОЧНАЯ подписура из декомпиляции GunScript_Local:
-                    -- (Humanoid, RootPart, урон, направление, отдача,
-                    -- вампиризм, поджог).
-                    local dmg = tonumber(CFG.KillAuraDamage) or 50
+                    -- Урон зажат на месте использования: сохранённые
+                    -- консолью/прошлой сессией значения не спамят сервер.
+                    local dmg = math.clamp(
+                        tonumber(CFG.KillAuraDamage) or 50, 1, 5000)
                     local dir = Vector3.new(0, 0, 1)
                     local delta = root.Position - myRoot.Position
                     if delta.Magnitude > 0.01 then dir = delta.Unit end
-                    -- Подброс жертв — 5-й аргумент (отдача вверх),
-                    -- вампиризм — 6-й (лечит стрелка за каждый удар).
+                    -- Подброс: не чаще 0.5 с на игрока, потолок отдачи
+                    -- разумный — невозможная физика сразу палит.
                     local knock = 0
                     if CFG.AuraFling then
-                        knock = 100000
-                        dir = Vector3.new(0, 1, 0)
+                        local ft = PE_FLING_AT[p]
+                        if not ft or now - ft > 0.5 then
+                            PE_FLING_AT[p] = now
+                            knock = 20000
+                            dir = Vector3.new(0, 1, 0)
+                        end
                     end
                     local heal = 0
                     if CFG.AuraLifesteal then heal = 1000000 end
-                    -- Бьём в голову (как настоящий хедшот) и поджигаем:
-                    -- огонь вешает серверный IgniteScript (урон по времени).
-                    local aimPart = ch:FindFirstChild("Head") or root
+                    -- Поджог: не чаще 1.5 с на игрока — серверный
+                    -- IgniteScript плодит инстансы на каждое true.
+                    local burnNow = false
+                    if CFG.AuraBurn ~= false then
+                        local bt = PE_BURN_AT[p]
+                        if not bt or now - bt > 1.5 then
+                            PE_BURN_AT[p] = now
+                            burnNow = true
+                        end
+                    end
+                    -- Бьём в голову (как настоящий хедшот); не-BasePart
+                    -- по имени Head пропускаем.
+                    local aimPart = root
+                    local headP = ch:FindFirstChild("Head")
+                    if headP and headP:IsA("BasePart") then
+                        aimPart = headP
+                    end
                     pcall(function()
                         remote:FireServer(hum, aimPart, dmg, dir, knock, heal,
-                            CFG.AuraBurn ~= false)
+                            burnNow)
                     end)
                 end
             end
@@ -2441,7 +2483,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.20",
+        LoadingSubtitle = "ESP + Combat v2.21",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2699,8 +2741,8 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = tonumber(CFG.KillAuraRadius) or 40,
         Suffix = " st", Callback = function(v) CFG.KillAuraRadius = v end })
     C:CreateSlider({ Name = "Damage per shot", Flag = "PE_KillAuraDamage",
-        Range = {1, 10000}, Increment = 10,
-        CurrentValue = math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 10000),
+        Range = {1, 5000}, Increment = 10,
+        CurrentValue = math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 5000),
         Callback = function(v) CFG.KillAuraDamage = v end })
     C:CreateSlider({ Name = "Tick delay", Flag = "PE_KillAuraDelay",
         Range = {10, 100}, Increment = 5,
@@ -2796,12 +2838,16 @@ local okGUI, errGUI = pcall(function()
     C:CreateParagraph({ Title = "Upgrade",
         Content = "Edits the Setting module of the gun in hands (require cache shared with GunScript_Local): damage, auto mode, zero spread, instant reload. Shots look legit but hit upgraded. Resets on weapon change/respawn - press again." })
     C:CreateSlider({ Name = "Upgrade damage", Flag = "PE_ModGunDamage",
-        Range = {10, 10000}, Increment = 10,
-        CurrentValue = math.clamp(tonumber(CFG.ModGunDamage) or 250, 10, 10000),
+        Range = {10, 2000}, Increment = 10,
+        CurrentValue = math.clamp(tonumber(CFG.ModGunDamage) or 250, 10, 2000),
         Callback = function(v) CFG.ModGunDamage = v end })
+    C:CreateToggle({ Name = "Gun lifesteal (heal per legit shot)",
+        Flag = "PE_GunLifesteal",
+        CurrentValue = CFG.GunLifesteal ~= false,
+        Callback = function(v) CFG.GunLifesteal = v end })
     C:CreateSlider({ Name = "Headshot multiplier", Flag = "PE_GunHeadshot",
-        Range = {2, 1000}, Increment = 1,
-        CurrentValue = math.clamp(tonumber(CFG.GunHeadshot) or 500, 2, 1000),
+        Range = {2, 200}, Increment = 1,
+        CurrentValue = math.clamp(tonumber(CFG.GunHeadshot) or 500, 2, 200),
         Callback = function(v) CFG.GunHeadshot = v end })
     C:CreateSlider({ Name = "Burst bullets per click", Flag = "PE_GunBurst",
         Range = {1, 15}, Increment = 1,
@@ -2826,10 +2872,10 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.GunFire == true,
         Callback = function(v) CFG.GunFire = v end })
     C:CreateSlider({ Name = "Knockback (fling victims)", Flag = "PE_GunKnockback",
-        Range = {0, 100000}, Increment = 1000,
-        CurrentValue = math.clamp(tonumber(CFG.GunKnockback) or 0, 0, 100000),
+        Range = {0, 20000}, Increment = 500,
+        CurrentValue = math.clamp(tonumber(CFG.GunKnockback) or 0, 0, 20000),
         Callback = function(v) CFG.GunKnockback = v end })
-    C:CreateSlider({ Name = "Piercing (walls/multi-hit)", Flag = "PE_GunPiercing",
+    C:CreateSlider({ Name = "Piercing (through bodies)", Flag = "PE_GunPiercing",
         Range = {0, 10}, Increment = 1,
         CurrentValue = math.clamp(tonumber(CFG.GunPiercing) or 5, 0, 10),
         Callback = function(v) CFG.GunPiercing = v end })
@@ -2870,9 +2916,9 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.TaserAura == true,
         Callback = function(v) CFG.TaserAura = v end })
     C:CreateSlider({ Name = "Taser delay", Flag = "PE_TaserDelay",
-        Range = {10, 200}, Increment = 10,
+        Range = {30, 200}, Increment = 10,
         CurrentValue = math.clamp(
-            math.floor((tonumber(CFG.TaserDelay) or 0.7) * 100 + 0.5), 10, 200),
+            math.floor((tonumber(CFG.TaserDelay) or 0.7) * 100 + 0.5), 30, 200),
         Suffix = " x10ms",
         Callback = function(v) CFG.TaserDelay = v / 100 end })
     C:CreateDropdown({
@@ -3165,10 +3211,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.20 stopped")
+    print("[PE] v2.21 stopped")
 end
 
-print("[PE] v2.20 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.21 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"

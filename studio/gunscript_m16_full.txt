@@ -1,0 +1,134 @@
+-- M16a4 MOD GunScript_Local — полный исходник из Studio-копии (19.9 КБ).
+-- Тот же qPerfection-кит стоит на ВСЕХ пушках игры (M9, MP5, MG42, Kord,
+-- AK-74, SVD, PPSH-41), отличия только в Setting-модуле.
+-- Ключевые факты: весь урон считается здесь, на клиенте; InflictTarget
+-- получает аргументы прямо из Setting; TEAM-глобал nil => тим-чек мёртв;
+-- Piercing прошивает ТЕЛА (не стены); Explosive бьёт только парты "Torso";
+-- хедшот = парт с именем "Head".
+
+local Parent = script.Parent
+local Handle = Parent:WaitForChild("Handle")
+local LocalPlayer = game.Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+local CurrentCamera = Workspace.CurrentCamera
+local u18 = Workspace:WaitForChild(LocalPlayer.Name)
+local Humanoid = u18:WaitForChild("Humanoid")
+script.Parent:WaitForChild("VisualizeBullet")
+local Setting = require(Parent:WaitForChild("Setting"))
+local GunScript_Server = Parent:WaitForChild("GunScript_Server")
+local ChangeAmmoAndClip = GunScript_Server:WaitForChild("ChangeAmmoAndClip")
+local InflictTarget = GunScript_Server:WaitForChild("InflictTarget")
+local Ammo = GunScript_Server:WaitForChild("Ammo")
+local Clips = GunScript_Server:WaitForChild("Clips")
+local u60 = script:WaitForChild("GunGUI")
+
+function RayCast(a1, a2, a3, a4) -- Line: 69
+    local v1, v2 = game.Workspace:FindPartOnRay(Ray.new(a1, a2 * a3), a4)
+    if v1 then
+        local v3, v4
+        if 0.75 < v1.Transparency
+            or v1.Name == "Handle" or v1.Name == "Effect"
+            or v1.Name == "Bullet" or v1.Name == "Laser"
+            or string.lower(v1.Name) == "water"
+            or v1.Name == "Rail" or v1.Name == "Arrow" then
+            v3, v4 = RayCast(v2 + a2 * 0.01, a2, a3 - (a1 - v2).magnitude, a4)
+            v1, v2 = v3, v4
+        elseif not v1.Parent:FindFirstChild("Humanoid") then
+            if not v1.Parent:FindFirstChild("Humanoid")
+                or not v1.Parent:FindFirstChild("TEAM") or not TEAM then
+                if v1.Parent:FindFirstChild("Humanoid")
+                    and u90[v1.Parent.Humanoid] then
+                    v3, v4 = RayCast(v2 + a2 * 0.01, a2,
+                        a3 - (a1 - v2).magnitude, a4)
+                    v1, v2 = v3, v4
+                end
+            elseif v1.Parent.TEAM.Value == TEAM.Value
+                or v1.Parent:FindFirstChild("Humanoid")
+                and u90[v1.Parent.Humanoid] then
+                v3, v4 = RayCast(v2 + a2 * 0.01, a2,
+                    a3 - (a1 - v2).magnitude, a4)
+                v1, v2 = v3, v4
+            end
+        elseif v1.Parent.Humanoid.Health == 0 then
+            v3, v4 = RayCast(v2 + a2 * 0.01, a2, a3 - (a1 - v2).magnitude, a4)
+            v1, v2 = v3, v4
+        end
+    end
+    return v1, v2
+end
+
+function Fire(a1) -- Line: 102
+    local Explosion, HumanoidRootPart, v1, v2
+    local Piercing = Setting.Piercing
+    u90 = {}
+    if not a1.FireSound.Playing or not a1.FireSound.Looped then
+        a1.FireSound:Play()
+        script.Parent.Model.casing:FireServer()
+    end
+    local p = (Humanoid.Torso.CFrame * CFrame.new(0, 1.5, 0)).p
+    local Spread = Setting.Spread
+    local v3 = Spread * (u83 and 1 - Setting.SpreadRedution or 1)
+    local lookVector = ((CFrame.new(p, Mouse.Hit.p)) * CFrame.Angles(
+        math.rad(-v3 + (math.random()) * (v3 * 2)),
+        math.rad(-v3 + (math.random()) * (v3 * 2)), 0)).lookVector
+    local v4 = a1
+    while Piercing >= 0 do
+        v1, v2 = RayCast(p, lookVector, 5000, u18)
+        if Setting.ExplosiveEnabled then
+            Explosion = Instance.new("Explosion")
+            Explosion.BlastRadius = Setting.Radius
+            Explosion.BlastPressure = 0
+            Explosion.Position = v2
+            Explosion.Parent = Workspace.CurrentCamera
+            Explosion.Hit:connect(function(hit) -- Line: 138
+                if hit and hit.Parent and hit.Name == "Torso" then
+                    local Humanoid = hit.Parent:FindFirstChild("Humanoid")
+                    local Torso = hit.Parent:FindFirstChild("Torso")
+                    if Humanoid and 0 < Humanoid.Health and Torso then
+                        InflictTarget:FireServer(
+                            Humanoid, Torso,
+                            Setting.HeadshotEnabled
+                                and Setting.BaseDamage
+                                    * Setting.HeadshotDamageMultiplier
+                                or Setting.BaseDamage,
+                            lookVector, Setting.Knockback,
+                            Setting.Lifesteal, Setting.FlamingBullet)
+                    end
+                end
+            end)
+            Piercing = 0
+        elseif v1 and v1.Parent then
+            local hum = v1.Parent:FindFirstChild("Humanoid")
+            local hrp = v1.Parent:FindFirstChild("HumanoidRootPart")
+            if not hum or not (0 < hum.Health) or not hrp then
+                Piercing = 0
+            else
+                InflictTarget:FireServer(
+                    hum, hrp,
+                    not (v1.Name ~= "Head") and Setting.HeadshotEnabled
+                        and Setting.BaseDamage * Setting.HeadshotDamageMultiplier
+                        or Setting.BaseDamage,
+                    lookVector, Setting.Knockback,
+                    Setting.Lifesteal, Setting.FlamingBullet)
+                u90[hum] = true
+            end
+        end
+        Piercing = v1 and Piercing - 1 or -1
+        p = v2 + lookVector * 0.01
+    end
+end
+
+function Reload() -- Line: 183
+    -- Перезарядка: ждёт Setting.ReloadTime, затем клиент сам вызывает
+    -- ChangeAmmoAndClip:FireServer(Setting.AmmoPerClip, Value_2).
+    -- Бесконечные патроны через прямой FireServer сервер НЕ принимает.
+end
+
+Mouse.Button1Down:connect(function() -- Line: 238
+    -- Цикл стрельбы: Auto крутит while u79; за клик:
+    --   BulletPerBurst x BulletPerShot выстрелов Fire(u67),
+    --   каждый Fire = рейкаст 5000 studs + InflictTarget на каждого
+    --   пробитого (Piercing = кол-во ДОП. тел за выстрел).
+    -- ChangeAmmoAndClip:FireServer(Value, Value_2) после каждой пули.
+    -- Клавиша R = Reload, E = снайперский зум (Setting.FieldOfView).
+end)
