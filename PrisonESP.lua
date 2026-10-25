@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.18
+--  PRISON ESP  v2.19
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1755,7 +1755,7 @@ G.PE.Team = function(teamName)
         return
     end
     print("[PE TEAM] ChooseTeamEvent('" .. tostring(teamName) .. "'). WATCH YOUR TEAM!")
-    r:FireServer(teamName)
+    pcall(function() r:FireServer(teamName) end)
 end
 
 -- ============================================================
@@ -1875,7 +1875,7 @@ G.PE.ResetMenu = function()
         return
     end
     print("[PE MENU] ResetToMenuEvent:FireServer()")
-    r:FireServer()
+    pcall(function() r:FireServer() end)
 end
 
 -- Ищем тул с нужным ремоутом/дочерним объектом: сначала экипированный.
@@ -2413,7 +2413,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.18",
+        LoadingSubtitle = "ESP + Combat v2.19",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2809,6 +2809,28 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.ModGunAuto ~= false,
         Callback = function(v) CFG.ModGunAuto = v end })
 
+    C:CreateSection("Keybinds")
+    C:CreateKeybind({ Name = "Kill aura", Flag = "PE_KB_KillAura",
+        CurrentKeybind = "K",
+        HoldToInteract = false,
+        Callback = function(v)
+            CFG.KillAura = not CFG.KillAura
+            print("[PE] kill aura "
+                .. (CFG.KillAura and "ON" or "OFF") .. " (keybind)")
+        end })
+    C:CreateKeybind({ Name = "Taser aura", Flag = "PE_KB_TaserAura",
+        CurrentKeybind = "T",
+        HoldToInteract = false,
+        Callback = function(v)
+            CFG.TaserAura = not CFG.TaserAura
+            print("[PE] taser aura "
+                .. (CFG.TaserAura and "ON" or "OFF") .. " (keybind)")
+        end })
+    C:CreateKeybind({ Name = "Tase selected player", Flag = "PE_KB_Tase",
+        CurrentKeybind = "Y",
+        HoldToInteract = false,
+        Callback = function(v) G.PE.Tase(CFG._target) end })
+
     C:CreateSection("Taser (stun)")
     C:CreateParagraph({ Title = "Taser",
         Content = "The taser client sends RemoteEvent:FireServer(POSITION) - the server stuns whoever stands at that position, the 5s cooldown is client-only. Aura spams enemy positions around you (radius = kill aura radius). Needs the Taser tool: switch to GUARD first." })
@@ -3110,10 +3132,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.18 stopped")
+    print("[PE] v2.19 stopped")
 end
 
-print("[PE] v2.18 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.19 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
