@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.30
+--  PRISON ESP  v2.31
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -187,9 +187,6 @@ CFG.SilentTeam = pickOpt(CFG.SilentTeam, { "Everyone" }, "Everyone")
 -- InflictTarget по СЕБЕ: урон 0, вампиризм 1000000. Никого не
 -- задеваем, ни огня, ни пуль — сервер просто хилит нас.
 CFG.Immortal = CFG.Immortal == true
--- КУЛЛ-ГАЙ-РЕЖИМ: то же самое, но с поджогом СЕБЯ (FlamingBullet).
--- Огонь вешает сервер => ВИДЯТ ВСЕ; урон огня перекрыт хилом.
-CFG.ImmortalBurn = CFG.ImmortalBurn == true
 -- C00LKIDD MODE (2014): медленное сожжение ВСЕХ — крошечный урон
 -- + серверный огонь => все горят и «по тихоньку» умирают. Замена
 -- текстур (небо + декали) на любую картинку — только у тебя на
@@ -2127,6 +2124,35 @@ G.PE.WearOutfit = function()
         .. math.floor(bestD) .. " studs away), returned home")
 end
 
+-- АВТО-ПОБЕГ: телепорт на ближайшую зону, ждём регистрации касания,
+-- возврат домой. Одним тогглом в ESP.
+G.PE.EscapeTrip = function()
+    local root = LP.Character
+        and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not root then
+        print("[PE ESCAPE] no character")
+        return
+    end
+    local best, bestD
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("BasePart") and d.Name == "EscapePart" then
+            local dd = (d.Position - root.Position).Magnitude
+            if not bestD or dd < bestD then best, bestD = d, dd end
+        end
+    end
+    if not best then
+        print("[PE ESCAPE] no EscapePart on the map")
+        return
+    end
+    local orig = root.CFrame
+    pcall(function() root.CFrame = best.CFrame + Vector3.new(0, 4, 0) end)
+    print("[PE ESCAPE] on the zone (" .. math.floor(bestD)
+        .. " studs), waiting for escape...")
+    task.wait(0.6)
+    pcall(function() root.CFrame = orig end)
+    print("[PE ESCAPE] returned home")
+end
+
 G.PE.Escape = function()
     local root = LP.Character
         and LP.Character:FindFirstChild("HumanoidRootPart")
@@ -2734,8 +2760,7 @@ local function auraTick()
                 immortalAt = now
                 pcall(function()
                     remoteI:FireServer(humI, rootI, 0,
-                        Vector3.new(0, 0, 1), 0, 1000000,
-                        CFG.ImmortalBurn == true)
+                        Vector3.new(0, 0, 1), 0, 1000000, false)
                 end)
             end
         end
@@ -2975,7 +3000,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.30",
+        LoadingSubtitle = "ESP + Combat v2.31",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3201,26 +3226,26 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.MinimapSelf ~= false,
         Callback = function(v) CFG.MinimapSelf = v end })
 
-    local M = safeNewTab(W, "World", "magnet", "World")
-    if not M then error("World tab failed") end
-    M:CreateSection("Ground items")
-    M:CreateParagraph({ Title = "Items",
+    T:CreateSection("Ground items")
+    T:CreateParagraph({ Title = "Items",
         Content = "Highlights guns, keycards, ammo boxes and the hammer on the ground (through walls)." })
-    M:CreateToggle({ Name = "Guns/keycards/ammo on ground", Flag = "PE_Items",
+    T:CreateToggle({ Name = "Guns/keycards/ammo on ground", Flag = "PE_Items",
         CurrentValue = CFG.Items ~= false,
         Callback = function(v) CFG.Items = v end })
-    M:CreateSection("Escape & danger zones")
-    M:CreateParagraph({ Title = "Zones",
-        Content = "Red = Death Part (kills you on touch), green = EscapePart (prisoner escape). Teleport puts you right on the nearest escape zone." })
-    M:CreateToggle({ Name = "Danger/escape zones ESP", Flag = "PE_DangerESP",
+    T:CreateSection("Escape & danger zones")
+    T:CreateParagraph({ Title = "Zones",
+        Content = "Red = Death Part (kills you on touch), green = EscapePart (prisoner escape). The auto-escape toggle teleports you onto the nearest zone, waits for the escape to register, then brings you back home." })
+    T:CreateToggle({ Name = "Danger/escape zones ESP", Flag = "PE_DangerESP",
         CurrentValue = CFG.DangerESP == true,
         Callback = function(v) CFG.DangerESP = v end })
-    M:CreateButton({ Name = "TELEPORT to escape zone",
-        Callback = function() G.PE.Escape() end })
-    M:CreateButton({ Name = "WEAR nearest outfit (disguise)",
-        Callback = function() G.PE.WearOutfit() end })
-    M:CreateButton({ Name = "Shop catalog -> console",
-        Callback = function() G.PE.ShopInfo() end })
+    T:CreateToggle({ Name = "AUTO-ESCAPE (tp to zone and back)",
+        Flag = "PE_AutoEscape",
+        CurrentValue = false,
+        Callback = function(v)
+            if v then
+                task.defer(function() G.PE.EscapeTrip() end)
+            end
+        end })
 
     -- ====================== ВКЛАДКА БОЙ ======================
     local C = safeNewTab(W, "Combat", "swords", "Combat")
@@ -3277,10 +3302,6 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_Immortal",
         CurrentValue = CFG.Immortal == true,
         Callback = function(v) CFG.Immortal = v end })
-    C:CreateToggle({ Name = "COOL GUY: burn yourself forever",
-        Flag = "PE_ImmortalBurn",
-        CurrentValue = CFG.ImmortalBurn == true,
-        Callback = function(v) CFG.ImmortalBurn = v end })
 
     C:CreateSection("Cuffs & teleport")
     C:CreateParagraph({ Title = "Cuffs & teleport",
@@ -3784,6 +3805,7 @@ G.PE_Stop = function()
     G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
     G.PE.Escape = nil
+    G.PE.EscapeTrip = nil
     G.PE.WearOutfit, G.PE.ShopInfo = nil, nil
     pcall(function() G.PE.TexRestore() end)
     G.PE.TexAll, G.PE.TexRestore = nil, nil
@@ -3796,10 +3818,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.30 stopped")
+    print("[PE] v2.31 stopped")
 end
 
-print("[PE] v2.30 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.31 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
