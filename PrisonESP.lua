@@ -2855,7 +2855,7 @@ local function auraTick()
         end
     else
         -- Выключили: отанкориваем (респавн и так вернёт на землю).
-        if CFG._apocPerchCF or CFG._apocPerched then
+        if CFG._apocPerchCF then
             CFG._apocPerchCF = nil
             local rootA = LP.Character
                 and LP.Character:FindFirstChild("HumanoidRootPart")
