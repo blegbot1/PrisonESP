@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.19
+--  PRISON ESP  v2.20
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -171,6 +171,8 @@ CFG.DangerESP = CFG.DangerESP == true
 -- АВТО-ПРОКАЧКА: новая пушка в руках (респавн/смена) — апгрейд
 -- применяется сам, кнопку жать не надо.
 CFG.ModGunAuto = CFG.ModGunAuto ~= false
+-- АДМИНЫ: подсветка магентой + [ADMIN] + алерт в консоль при входе.
+CFG.AdminESP = CFG.AdminESP ~= false
 
 local STOPPED = false
 local Rayfield
@@ -1137,8 +1139,22 @@ end -- VIS
 --  РОЛИ: охрана / зек / преступник / прочий
 -- ============================================================
 local TEAM_GUARD = { "guard", "cop", "police", "охра", "охран", "тюремщ" }
-local TEAM_CRIM  = { "crim", "преступ", "villain", "злоде", " villain" }
+local TEAM_CRIM  = { "crim", "escaped", "escap", "побег", "преступ", "villain", "злоде" }
 local TEAM_PRIS  = { "pris", "зек", "inmate", "заключ" }
+
+-- UserId админов, вшитые в LocalScript админ-панели игры (u45) +
+-- создатель игры (CreatorId). Команда «Escaped» в Teams — это и есть
+-- преступники (бывшая кнопка «Criminal» звала несуществующую команду).
+local PE_ADMINS = {
+    [86513279] = true, [4008579942] = true,
+    [4865533262] = true, [66120198] = true,
+}
+local PE_CREATOR_ID = 0
+pcall(function() PE_CREATOR_ID = tonumber(game.CreatorId) or 0 end)
+local function isAdminP(p)
+    if PE_ADMINS[p.UserId] then return true end
+    return PE_CREATOR_ID ~= 0 and p.UserId == PE_CREATOR_ID
+end
 
 local function nameHasRole(n, list)
     for _, k in ipairs(list) do
@@ -1292,6 +1308,11 @@ mainConn = RunService.RenderStepped:Connect(function()
                 if nowT - (e.roleAt or 0) > 0.7 then
                     e.roleAt = nowT
                     e.role = roleOf(plr)
+                    if isAdminP(plr) and not e.adminWarned then
+                        e.adminWarned = true
+                        warn("[PE] ADMIN ON SERVER: " .. plr.Name
+                            .. " (userId " .. plr.UserId .. ") - be careful!")
+                    end
                 end
 
                 if not (e.gui and e.gui.Parent and e.lbl) then
@@ -1300,7 +1321,11 @@ mainConn = RunService.RenderStepped:Connect(function()
                 else
                     local role = e.role
                     local vis, color
-                    if role == "guard" then
+                    if isAdminP(plr) then
+                        -- Админ: всегда заметен, магента поверх роли.
+                        vis = CFG.AdminESP ~= false
+                        color = Color3.fromRGB(255, 0, 255)
+                    elseif role == "guard" then
                         vis = CFG.GuardESP ~= false
                         color = safeColor(CFG.ColGuard, Color3.new(0.3, 0.7, 1))
                     elseif role == "prisoner" then
@@ -1344,6 +1369,9 @@ mainConn = RunService.RenderStepped:Connect(function()
 
                     if vis then
                         local parts = {}
+                        if isAdminP(plr) then
+                            parts[#parts + 1] = "[ADMIN]"
+                        end
                         if CFG.RoleTags then
                             local tag = ROLE_TAG[role]
                             if tag then parts[#parts + 1] = tag end
@@ -2413,7 +2441,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.19",
+        LoadingSubtitle = "ESP + Combat v2.20",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2470,6 +2498,9 @@ local okGUI, errGUI = pcall(function()
     T:CreateToggle({ Name = "ESP criminals", Flag = "PE_CriminalESP",
         CurrentValue = CFG.CriminalESP ~= false,
         Callback = function(v) CFG.CriminalESP = v end })
+    T:CreateToggle({ Name = "Admins highlight + alert", Flag = "PE_AdminESP",
+        CurrentValue = CFG.AdminESP ~= false,
+        Callback = function(v) CFG.AdminESP = v end })
     T:CreateColorPicker({ Name = "Criminal color", Flag = "PE_ColCrim",
         Color = CFG.ColCrim, Callback = function(c) CFG.ColCrim = c end })
     T:CreateToggle({ Name = "ESP others", Flag = "PE_PlayerESP",
@@ -2865,6 +2896,8 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.Team("Guard") end })
     C:CreateButton({ Name = "Team: PRISONER",
         Callback = function() G.PE.Team("Prisoner") end })
+    C:CreateButton({ Name = "Team: ESCAPED (criminal)",
+        Callback = function() G.PE.Team("Escaped") end })
     C:CreateButton({ Name = "Reset to menu (escape cuffs)",
         Callback = function() G.PE.ResetMenu() end })
 
@@ -3132,10 +3165,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.19 stopped")
+    print("[PE] v2.20 stopped")
 end
 
-print("[PE] v2.19 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.20 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
