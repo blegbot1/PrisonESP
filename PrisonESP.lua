@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.36
+--  PRISON ESP  v2.37
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -122,10 +122,6 @@ CFG.KillAura       = CFG.KillAura == true
 CFG.KillAuraRadius = tonumber(CFG.KillAuraRadius) or 40
 CFG.KillAuraDelay  = tonumber(CFG.KillAuraDelay) or 0.15
 CFG.KillAuraTeam   = pickOpt(CFG.KillAuraTeam, { "Everyone" }, "Everyone")
--- НАРУЧНИКИ: CuffEvent сковывает игрока. Handcuffs выдаются за
--- GUARD (команда переключается мгновенно кнопкой).
-CFG.CuffAura = CFG.CuffAura == true
-CFG.CuffTeam = pickOpt(CFG.CuffTeam, { "Everyone" }, "Everyone")
 -- АНТИ-СТАН: тазер/наручники/регдолл не должны останавливать.
 CFG.AntiStun = CFG.AntiStun ~= false
 -- Урон килл-ауры и бесконечные патроны. Подписура InflictTarget взята
@@ -162,12 +158,6 @@ CFG.GunAmmoHack = CFG.GunAmmoHack == true
 -- Снайперский прицел на ЛЮБОЙ пушке: Setting.SniperEnabled, зум
 -- по клавише E (FieldOfView из Setting).
 CFG.GunScope = CFG.GunScope == true
--- ТАЗЕР: клиент шлёт Taser.RemoteEvent:FireServer(ПОЗИЦИЯ) — сервер
--- станит того, кто стоит у позиции. 5-секундный кулдаун в клиенте —
--- шлём напрямую и без него.
-CFG.TaserAura = CFG.TaserAura == true
-CFG.TaserDelay = tonumber(CFG.TaserDelay) or 0.7
-CFG.TaserTeam = pickOpt(CFG.TaserTeam, { "Everyone" }, "Everyone")
 -- ОПАСНЫЕ ЗОНЫ: Death Part подсветка + телепорт к зоне побега.
 CFG.DangerESP = CFG.DangerESP == true
 -- АВТО-ПРОКАЧКА: новая пушка в руках (респавн/смена) — апгрейд
@@ -175,26 +165,15 @@ CFG.DangerESP = CFG.DangerESP == true
 CFG.ModGunAuto = CFG.ModGunAuto ~= false
 -- АДМИНЫ: подсветка магентой + [ADMIN] + алерт в консоль при входе.
 CFG.AdminESP = CFG.AdminESP ~= false
--- КЛИЕНТСКИЙ АИМ: пока зажата ЛКМ с пушкой — каждый «выстрел» сам
--- уходит InflictTarget'ом в цель у прицела. Рейкаста нет => стены
--- не существуют. Урон берём из Setting экипированной пушки
--- (прокачанной — прокачанный).
-CFG.SilentAim = CFG.SilentAim == true
-CFG.SilentFOV = tonumber(CFG.SilentFOV) or 180
-CFG.SilentRate = tonumber(CFG.SilentRate) or 0.12
-CFG.SilentTeam = pickOpt(CFG.SilentTeam, { "Everyone" }, "Everyone")
 -- БЕССМЕРТИЕ: цикл вампиризма БЕЗ жертвы — раз в 0.5с шлём
 -- InflictTarget по СЕБЕ: урон 0, вампиризм 1000000. Никого не
 -- задеваем, ни огня, ни пуль — сервер просто хилит нас.
 CFG.Immortal = CFG.Immortal == true
 -- C00LKIDD MODE (2014): медленное сожжение ВСЕХ — крошечный урон
--- + серверный огонь => все горят и «по тихоньку» умирают. Замена
--- текстур (небо + декали) на любую картинку — только у тебя на
--- экране (FE-эпоха), горение — глобальное.
+-- + серверный огонь => все горят и «по тихоньку» умирают.
 CFG.C00lMode = CFG.C00lMode == true
 CFG.C00lDamage = tonumber(CFG.C00lDamage) or 3
 CFG.C00lTeam = pickOpt(CFG.C00lTeam, { "Everyone" }, "Everyone")
-CFG.TexID = tostring(CFG.TexID or "")
 -- МГНОВЕННЫЙ РЕВАЙН: умер — сами шлём ResetToMenuEvent и возвращаемся
 -- в прошлую команду. Даунтайм ~1.5с вместо стандартного респавна.
 CFG.FastRespawn = CFG.FastRespawn == true
@@ -207,14 +186,10 @@ CFG.AutoGiveName = pickOpt(CFG.AutoGiveName, {
 -- РЕТРИБУЦИЯ: получили урон — мгновенно находим атакующего
 -- (вооружённые в приоритете) и сжигаем его.
 CFG.Retr = CFG.Retr ~= false
--- СПИН-БОТ: вращаем своего персонажа (владелец физики — клиент,
--- вращение реплицируется и ВИДНО ВСЕМ).
-CFG.Spin = CFG.Spin == true
-CFG.SpinSpeed = tonumber(CFG.SpinSpeed) or 30
 
 local STOPPED = false
 local Rayfield
-local mainConn, itemConn, auraConn, dangerConn, spinConn
+local mainConn, itemConn, auraConn, dangerConn
 local by = {}          -- [Player] = {char, gui, lbl, box, role, vis, roleAt}
 
 -- ============================================================
@@ -1984,141 +1959,7 @@ G.PE.GiveAll = function()
 end
 
 -- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
--- ЗАМЕНА ТЕКСТУР (локально): небо + все декали + ТЕКСТУРА НА КАЖДОЙ
--- грани каждой крупной части мира. ВАЖНО: картинка умножается на цвет
--- части — тёмные стены делают её невидимой, поэтому основа красится
--- в белый (+ SmoothPlastic), оригиналы хранятся для RESTORE.
-local PE_TEX_ORIG = setmetatable({}, { __mode = "k" })
-local PE_TEX_PARTS = setmetatable({}, { __mode = "k" })
-local PE_TEX_MADE = {}
-local PE_TEX_SKY_MADE = false
-local function peWhiten(part)
-    if not part or not part:IsA("BasePart") or part:IsA("Terrain") then
-        return
-    end
-    if PE_TEX_PARTS[part] then return end
-    PE_TEX_PARTS[part] = { Color = part.Color, Material = part.Material }
-    pcall(function()
-        part.Color = Color3.new(1, 1, 1)
-        part.Material = Enum.Material.SmoothPlastic
-    end)
-end
-G.PE.TexAll = function()
-    local id = tostring(CFG.TexID or ""):gsub("%D", "")
-    if id == "" then
-        print("[PE TEX] paste a decal image id first (any image!)")
-        return
-    end
-    if #PE_TEX_MADE > 0 or next(PE_TEX_PARTS) then
-        print("[PE TEX] already applied - press RESTORE first")
-        return
-    end
-    local asset = "rbxassetid://" .. id
-    local n = 0
-    local sky = game:GetService("Lighting"):FindFirstChildOfClass("Sky")
-    if not sky then
-        local ok, ns = pcall(function()
-            local s = Instance.new("Sky")
-            s.Parent = game:GetService("Lighting")
-            return s
-        end)
-        if ok and ns then
-            sky = ns
-            PE_TEX_SKY_MADE = true
-        end
-    end
-    if sky then
-        if PE_TEX_ORIG[sky] == nil then PE_TEX_ORIG[sky] = {} end
-        for _, f in ipairs({ "SkyboxBk", "SkyboxDn", "SkyboxFt",
-            "SkyboxLf", "SkyboxRt", "SkyboxUp" }) do
-            if PE_TEX_ORIG[sky][f] == nil then
-                PE_TEX_ORIG[sky][f] = sky[f]
-            end
-            pcall(function() sky[f] = asset end)
-            n = n + 1
-        end
-    end
-    local faces = {
-        Enum.NormalId.Front, Enum.NormalId.Back, Enum.NormalId.Top,
-        Enum.NormalId.Bottom, Enum.NormalId.Left, Enum.NormalId.Right,
-    }
-    -- Один проход: существующие декали подменяем (и белую основу их
-    -- части), крупным частям вешаем Texture на все 6 граней.
-    for _, d in ipairs(workspace:GetDescendants()) do
-        if d:IsA("Decal") or d:IsA("Texture") then
-            if d.Texture ~= "" then
-                if PE_TEX_ORIG[d] == nil then
-                    PE_TEX_ORIG[d] = d.Texture
-                end
-                pcall(function() d.Texture = asset end)
-                peWhiten(d.Parent)
-                n = n + 1
-            end
-        elseif d:IsA("BasePart") and not d:IsA("Terrain") then
-            local sz = d.Size
-            if sz.X >= 4 and sz.Y >= 2 and sz.Z >= 4 then
-                peWhiten(d)
-                for _, face in ipairs(faces) do
-                    local ok, tx = pcall(function()
-                        local t = Instance.new("Texture")
-                        t.Texture = asset
-                        t.Face = face
-                        t.StudsPerTileU = 8
-                        t.StudsPerTileV = 8
-                        t.Parent = d
-                        return t
-                    end)
-                    if ok and tx then
-                        PE_TEX_MADE[#PE_TEX_MADE + 1] = tx
-                        n = n + 1
-                    end
-                end
-            end
-        end
-    end
-    print("[PE TEX] " .. n .. " surfaces -> " .. asset
-        .. " + white base (visible ONLY to you)")
-end
-G.PE.TexRestore = function()
-    local n = 0
-    for _, tx in ipairs(PE_TEX_MADE) do
-        if tx and tx.Parent then
-            pcall(function() tx:Destroy() end)
-        end
-        n = n + 1
-    end
-    PE_TEX_MADE = {}
-    for part, orig in pairs(PE_TEX_PARTS) do
-        if typeof(part) == "Instance" and part.Parent then
-            pcall(function()
-                part.Color = orig.Color
-                part.Material = orig.Material
-            end)
-        end
-        n = n + 1
-    end
-    PE_TEX_PARTS = setmetatable({}, { __mode = "k" })
-    for obj, v in pairs(PE_TEX_ORIG) do
-        if typeof(obj) == "Instance" and obj.Parent then
-            if obj:IsA("Sky") and type(v) == "table" then
-                for f, val in pairs(v) do
-                    pcall(function() obj[f] = val end)
-                    n = n + 1
-                end
-            elseif type(v) == "string" then
-                pcall(function() obj.Texture = v end)
-                n = n + 1
-            end
-        end
-    end
-    if PE_TEX_SKY_MADE then
-        local sky = game:GetService("Lighting"):FindFirstChildOfClass("Sky")
-        if sky then pcall(function() sky:Destroy() end) end
-        PE_TEX_SKY_MADE = false
-    end
-    PE_TEX_ORIG = setmetatable({}, { __mode = "k" })
-    print("[PE TEX] restored " .. n .. " surfaces")
-end
+-- ЗАМЕНА ТЕКСТУР удалена (v2.37) по запросу.
 
 G.PE.ShopInfo = function()
     local f = ReplicatedStorage:FindFirstChild("ShopRemotes")
@@ -2425,44 +2266,6 @@ G.PE.ModGun = function(dmg)
         .. ", auto, no spread")
 end
 
--- ТАЗЕР: клиент бьёт RemoteEvent:FireServer(ПОЗИЦИЯ). Возвращает
--- тул и ремоут, если Taser в руках/рюкзаке.
-local function findTaser()
-    local pools = { LP.Character, LP:FindFirstChild("Backpack") }
-    for _, pool in ipairs(pools) do
-        if pool then
-            for _, t in ipairs(pool:GetChildren()) do
-                if t:IsA("Tool") and t.Name:lower():find("taser") then
-                    local ev = t:FindFirstChild("RemoteEvent")
-                    if ev then return t, ev end
-                end
-            end
-        end
-    end
-    return nil
-end
-
-G.PE.Tase = function(name)
-    name = name or CFG._target
-    local t, ev = findTaser()
-    if not t or not ev then
-        print("[PE TASE] no Taser tool in hands/backpack (GUARD team)")
-        return
-    end
-    local p = name and findPlayer(name)
-    local r5 = p and p.Character
-        and p.Character:FindFirstChild("HumanoidRootPart")
-    if not p or not r5 then
-        print("[PE TASE] target not found: " .. tostring(name))
-        return
-    end
-    for _ = 1, 3 do
-        pcall(function() ev:FireServer(r5.Position) end)
-        task.wait(0.12)
-    end
-    print("[PE TASE] " .. p.Name .. " tased x3 (position shots)")
-end
-
 -- ФЕЙК-ВЫСТРЕЛ: VisualizeBullet:FireServer(...) — сервер ретранслирует
 -- трассер ВСЕМ игрокам (так враги видят чужие пули). Подписура из
 -- GunScript_Local; урона нет — чистая психоз-атака: враг видит,
@@ -2554,13 +2357,10 @@ local function targetAllowed(p, sel, myTeam)
     return p.Name == sel or p.DisplayName == sel
 end
 
--- Цикл: cuff-аура, тазер-аура, анти-стан, килл-аура.
+-- Цикл: ретрибуция, анти-стан, килл-аура, прокачка.
 local auraAt = 0
-local cuffAt = 0
-local taserAt = 0
 local stunAt = 0
 local modAt = 0
-local silentAt = 0
 local immortalAt = 0
 local c00lAt = 0
 local retAt = 0
@@ -2590,95 +2390,6 @@ local function findAttacker(myRoot)
     return bestP
 end
 
--- Зажатие ЛКМ для клиентского аима.
-local PE_MOUSE_DOWN = false
-local mouseConn1 = LP:GetMouse().Button1Down:Connect(function()
-    PE_MOUSE_DOWN = true
-end)
-local mouseConn2 = LP:GetMouse().Button1Up:Connect(function()
-    PE_MOUSE_DOWN = false
-end)
-
--- КЛИЕНТСКИЙ АИМ: один «выстрел» = InflictTarget точно в цель у
--- прицела (голова), без рейкаста — сквозь стены. Плюс честный
--- трассер VisualizeBullet, прилетающий в жертву: для всех это
--- выглядит как попадание.
-local function silentShot()
-    local chr = LP.Character
-    local tool = chr and chr:FindFirstChildOfClass("Tool")
-    if not tool then return end
-    local gsv = tool:FindFirstChild("GunScript_Server")
-    local remote = gsv and gsv:FindFirstChild("InflictTarget")
-    if not remote then return end
-    local cam = workspace.CurrentCamera
-    local mouse = LP:GetMouse()
-    if not cam or not mouse then return end
-    local mpos = Vector2.new(mouse.X, mouse.Y)
-    local bestP, bestD = nil, nil
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP then
-            local ch = p.Character
-            local hum = ch and ch:FindFirstChildOfClass("Humanoid")
-            local head = ch and (ch:FindFirstChild("Head")
-                or ch:FindFirstChild("HumanoidRootPart"))
-            if ch and hum and hum.Health > 0 and head
-               and not ch:FindFirstChildOfClass("ForceField")
-               and targetAllowed(p, CFG.SilentTeam or "Everyone", LP.Team) then
-                local sp = cam:WorldToViewportPoint(head.Position)
-                if sp and sp.Z > 0 then
-                    local d = (Vector2.new(sp.X, sp.Y) - mpos).Magnitude
-                    if d <= (tonumber(CFG.SilentFOV) or 180)
-                       and (not bestD or d < bestD) then
-                        bestP, bestD = p, d
-                    end
-                end
-            end
-        end
-    end
-    if not bestP then return end
-    local ch = bestP.Character
-    local hum = ch:FindFirstChildOfClass("Humanoid")
-    local head = ch:FindFirstChild("Head")
-        or ch:FindFirstChild("HumanoidRootPart")
-    local myRoot = chr:FindFirstChild("HumanoidRootPart")
-    -- Урон — из Setting экипированной пушки (после ModGun — прокачанный).
-    local dmg = math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 5000)
-    if tool:FindFirstChild("Setting") then
-        pcall(function()
-            local S = require(tool.Setting)
-            if tonumber(S.BaseDamage) then
-                dmg = math.clamp(tonumber(S.BaseDamage), 1, 5000)
-            end
-        end)
-    end
-    local dir = Vector3.new(0, 0, 1)
-    if myRoot then
-        local delta = head.Position - myRoot.Position
-        if delta.Magnitude > 0.01 then dir = delta.Unit end
-    end
-    local heal = CFG.AuraLifesteal ~= false and 1000000 or 0
-    pcall(function()
-        remote:FireServer(hum, head, dmg, dir, 0, heal, false)
-    end)
-    -- Трассер «пуля прилетела в жертву» — его видят все игроки.
-    local vb = tool:FindFirstChild("VisualizeBullet")
-    local gsl = tool:FindFirstChild("GunScript_Local")
-    local handle = tool:FindFirstChild("Handle")
-    if vb and gsl and handle then
-        pcall(function()
-            vb:FireServer(handle, Vector3.new(0, 0.625, 1.25),
-                head.Position,
-                gsl:FindFirstChild("MuzzleEffect"),
-                gsl:FindFirstChild("HitEffect"),
-                186809061,
-                { false, 8, 0 },
-                { 25, Vector3.new(0.25, 0.25, 100),
-                    BrickColor.new("Bright yellow").Color, 0.25,
-                    Enum.Material.SmoothPlastic, 0.25 },
-                true, false)
-        end)
-    end
-end
 local function auraTick()
     local now = os.clock()
 
@@ -2731,14 +2442,6 @@ local function auraTick()
         end
     end
 
-    -- КЛИЕНТСКИЙ АИМ: зажата ЛКМ с пушкой — «выстрелы» уходят точно
-    -- в цель у прицела (сквозь стены), с трассером.
-    if CFG.SilentAim and PE_MOUSE_DOWN and now - silentAt
-        >= math.max(0.08, tonumber(CFG.SilentRate) or 0.12) then
-        silentAt = now
-        pcall(silentShot)
-    end
-
     -- АВТО-ПРОКАЧКА: пушка без метки в руках — апгрейдим сразу.
     if CFG.ModGunAuto ~= false and now - modAt >= 1 then
         modAt = now
@@ -2747,87 +2450,6 @@ local function auraTick()
         if toolM and toolM:FindFirstChild("Setting")
            and not toolM:GetAttribute("PE_Marked") then
             G.PE.ModGun()
-        end
-    end
-
-    -- CUFF-АУРА: сковывает наручниками ближайшего врага (Handcuffs
-    -- должны быть в руках/рюкзаке — выдаются за GUARD).
-    if CFG.CuffAura and now - cuffAt >= 0.6 then
-        cuffAt = now
-        local chrC = LP.Character
-        local humC = chrC and chrC:FindFirstChildOfClass("Humanoid")
-        local rootC = chrC and chrC:FindFirstChild("HumanoidRootPart")
-        if humC and rootC then
-            local tool, equipped2 = findToolWith("CuffEvent")
-            if tool then
-                if not equipped2 then
-                    pcall(function() humC:EquipTool(tool) end)
-                end
-                local bestP, bestD
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LP then
-                        local ch4 = p.Character
-                        local r4 = ch4 and ch4:FindFirstChild("HumanoidRootPart")
-                        if r4 and targetAllowed(p, CFG.CuffTeam or "Everyone", LP.Team) then
-                            local d = (r4.Position - rootC.Position).Magnitude
-                            if not bestD or d < bestD then
-                                bestP, bestD = p, d
-                            end
-                        end
-                    end
-                end
-                if bestP and bestD and bestD <= 16 then
-                    local ev = tool:FindFirstChild("CuffEvent")
-                    if ev then
-                        pcall(function() ev:FireServer(bestP) end)
-                        local ch5 = bestP.Character
-                        if ch5 then
-                            pcall(function() ev:FireServer(ch5) end)
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- ТАЗЕР-АУРА: шлём позиции врагов в Taser.RemoteEvent — сервер
-    -- станит того, кто у позиции. Радиус = радиусу килл-ауры.
-    if CFG.TaserAura and now - taserAt >= math.max(0.3,
-        tonumber(CFG.TaserDelay) or 0.7) then
-        taserAt = now
-        local t, ev = findTaser()
-        if t and ev then
-            local rootT = LP.Character
-                and LP.Character:FindFirstChild("HumanoidRootPart")
-            if rootT then
-                local fired = 0
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LP and fired < 5 then
-                        local ch4 = p.Character
-                        local h4 = ch4 and ch4:FindFirstChildOfClass("Humanoid")
-                        local r4 = ch4 and ch4:FindFirstChild("HumanoidRootPart")
-                        if ch4 and h4 and h4.Health > 0 and r4
-                           and targetAllowed(p,
-                               CFG.TaserTeam or "Except my team", LP.Team)
-                           and (r4.Position - rootT.Position).Magnitude
-                               <= (tonumber(CFG.KillAuraRadius) or 40) then
-                            -- Не чаще 2.5 с на игрока: у честного клиента
-                            -- кулдаун 5 с, суперчастота = флаг админам.
-                            local lt = PE_TASE_AT[p]
-                            if not lt or now - lt > 2.5 then
-                                PE_TASE_AT[p] = now
-                                fired = fired + 1
-                                pcall(function()
-                                    ev:FireServer(r4.Position)
-                                end)
-                            end
-                        end
-                    end
-                end
-            end
-        elseif os.clock() - (CFG._noTaserWarnAt or 0) > 10 then
-            CFG._noTaserWarnAt = os.clock()
-            warn("[PE] taser aura: no Taser tool (switch to GUARD)")
         end
     end
 
@@ -3051,22 +2673,8 @@ auraConn = RunService.Heartbeat:Connect(function()
     end
 end)
 
--- СПИН-БОТ: владелец физики своего персонажа — клиент, поэтому
--- вращение реплицируется на сервер и его ВИДЯТ ВСЕ игроки.
-spinConn = RunService.Heartbeat:Connect(function()
-    if STOPPED or not CFG.Spin then return end
-    local chr = LP.Character
-    local root = chr and chr:FindFirstChild("HumanoidRootPart")
-    local hum = chr and chr:FindFirstChildOfClass("Humanoid")
-    if root and hum and hum.Health > 0 then
-        if hum.AutoRotate then hum.AutoRotate = false end
-        pcall(function()
-            root.CFrame = root.CFrame * CFrame.Angles(0,
-                math.rad(math.clamp(tonumber(CFG.SpinSpeed) or 30,
-                    5, 180)), 0)
-        end)
-    end
-end)
+-- СПИН-БОТ удалён (v2.37) по запросу: при выключении AutoRotate
+-- не возвращался и персонаж переставал поворачиваться.
 
 
 -- ============================================================
@@ -3148,7 +2756,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.36",
+        LoadingSubtitle = "ESP + Combat v2.37",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3603,62 +3211,6 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.Immortal == true,
         Callback = function(v) CFG.Immortal = v end })
 
-    C:CreateSection("Cuffs & teleport")
-    C:CreateParagraph({ Title = "Cuffs & teleport",
-        Content = "The combo: teleport behind the victim + instant cuffs via CuffEvent. Handcuffs exist only for GUARD - press 'Team: GUARD' first, respawn, then use the buttons." })
-    local opts1 = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP then opts1[#opts1 + 1] = p.Name end
-    end
-    table.sort(opts1)
-    if #opts1 == 0 then opts1[1] = "(no players)" end
-    local cuffDrop = C:CreateDropdown({
-        Name = "Victim (pick a player)",
-        Flag = "PE_TargetPick2",
-        Options = opts1,
-        CurrentOption = {},
-        MultipleOptions = false,
-        Callback = function(selected)
-            local picked = selected
-            if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then
-                CFG._target = picked
-                print("[PE] target = " .. picked)
-            end
-        end,
-    })
-    targetPickers[#targetPickers + 1] = cuffDrop
-    C:CreateButton({ Name = "TELEPORT to player (behind)",
-        Callback = function() G.PE.TP(CFG._target) end })
-    C:CreateButton({ Name = "CUFF player",
-        Callback = function() G.PE.Cuff(CFG._target) end })
-    C:CreateButton({ Name = "TELEPORT + CUFF (combo)",
-        Callback = function()
-            G.PE.TP(CFG._target)
-            task.wait(0.15)
-            G.PE.Cuff(CFG._target)
-        end })
-    C:CreateToggle({ Name = "Cuff aura (nearest enemy)",
-        Flag = "PE_CuffAura",
-        CurrentValue = CFG.CuffAura == true,
-        Callback = function(v) CFG.CuffAura = v end })
-    local cuffTeamDrop = C:CreateDropdown({
-        Name = "Who to cuff",
-        Flag = "PE_CuffTeamPick",
-        Options = teamOpts(),
-        CurrentOption = { CFG.CuffTeam },
-        MultipleOptions = false,
-        Callback = function(selected)
-            local picked = selected
-            if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then
-                CFG.CuffTeam = picked
-                print("[PE] cuff target: " .. picked)
-            end
-        end,
-    })
-    teamPickers[#teamPickers + 1] = cuffTeamDrop
-
     C:CreateSection("Gun upgrade")
     C:CreateParagraph({ Title = "Upgrade",
         Content = "Edits the Setting module of the gun in hands (require cache shared with GunScript_Local): damage, auto mode, zero spread, instant reload. Shots look legit but hit upgraded. Resets on weapon change/respawn - press again." })
@@ -3719,41 +3271,9 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.ModGunAuto ~= false,
         Callback = function(v) CFG.ModGunAuto = v end })
 
-    C:CreateSection("Taser (stun)")
-    C:CreateParagraph({ Title = "Taser",
-        Content = "The taser client sends RemoteEvent:FireServer(POSITION) - the server stuns whoever stands at that position, the 5s cooldown is client-only. Aura spams enemy positions around you (radius = kill aura radius). Needs the Taser tool: switch to GUARD first." })
-    C:CreateToggle({ Name = "Taser aura (stun everyone near)",
-        Flag = "PE_TaserAura",
-        CurrentValue = CFG.TaserAura == true,
-        Callback = function(v) CFG.TaserAura = v end })
-    C:CreateSlider({ Name = "Taser delay", Flag = "PE_TaserDelay",
-        Range = {30, 200}, Increment = 10,
-        CurrentValue = math.clamp(
-            math.floor((tonumber(CFG.TaserDelay) or 0.7) * 100 + 0.5), 30, 200),
-        Suffix = " x10ms",
-        Callback = function(v) CFG.TaserDelay = v / 100 end })
-    local taserTeamDrop = C:CreateDropdown({
-        Name = "Who to tase",
-        Flag = "PE_TaserTeamPick",
-        Options = teamOpts(),
-        CurrentOption = { CFG.TaserTeam },
-        MultipleOptions = false,
-        Callback = function(selected)
-            local picked = selected
-            if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then
-                CFG.TaserTeam = picked
-                print("[PE] taser target: " .. picked)
-            end
-        end,
-    })
-    teamPickers[#teamPickers + 1] = taserTeamDrop
-    C:CreateButton({ Name = "TASE selected player (x3)",
-        Callback = function() G.PE.Tase(CFG._target) end })
-
     C:CreateSection("C00LKIDD MODE (2014)")
     C:CreateParagraph({ Title = "c00lkidd",
-        Content = "Slow-burn EVERYONE: tiny damage every 1.2s + server fire - players burn and die slowly, visible to the whole server (needs a gun). Texture swap: paste ANY decal image id (your own photo - upload it to Roblox as a decal first) and the sky + all decals become that image - local-only, just for your screen, the burn is global. The 2014 legend returns." })
+        Content = "Slow-burn EVERYONE: tiny damage every 1.2s + server fire - players burn and die slowly, visible to the whole server (needs a gun). The 2014 legend returns." })
     C:CreateToggle({ Name = "Slow burn EVERYONE (server-wide fire)",
         Flag = "PE_C00lMode",
         CurrentValue = CFG.C00lMode == true,
@@ -3778,49 +3298,6 @@ local okGUI, errGUI = pcall(function()
         end,
     })
     teamPickers[#teamPickers + 1] = burnDrop
-    C:CreateInput({ Name = "Decal image id (your photo)",
-        PlaceholderText = "e.g. 123456789",
-        CurrentValue = tostring(CFG.TexID or ""),
-        Flag = "PE_TexID",
-        Callback = function(text) CFG.TexID = tostring(text) end })
-    C:CreateButton({ Name = "REPLACE ALL TEXTURES (sky + every wall)",
-        Callback = function() G.PE.TexAll() end })
-    C:CreateButton({ Name = "RESTORE textures",
-        Callback = function() G.PE.TexRestore() end })
-
-    C:CreateSection("Client aim (silent)")
-    C:CreateParagraph({ Title = "Silent aim",
-        Content = "Hold LMB with a gun: every shot is re-sent straight into the head of the target nearest to your crosshair - no raycast at all, so it hits through walls. Damage comes from the equipped gun's Setting (upgraded gun = upgraded damage). A real tracer flies into the victim so everyone sees a legit hit. FOV = max distance from crosshair in pixels." })
-    C:CreateToggle({ Name = "Silent aim (crosshair target, walls)",
-        Flag = "PE_SilentAim",
-        CurrentValue = CFG.SilentAim == true,
-        Callback = function(v) CFG.SilentAim = v end })
-    C:CreateSlider({ Name = "Aim FOV radius (px)", Flag = "PE_SilentFOV",
-        Range = {30, 600}, Increment = 10,
-        CurrentValue = math.clamp(tonumber(CFG.SilentFOV) or 180, 30, 600),
-        Callback = function(v) CFG.SilentFOV = v end })
-    C:CreateSlider({ Name = "Aim shot rate", Flag = "PE_SilentRate",
-        Range = {8, 30}, Increment = 1,
-        CurrentValue = math.clamp(
-            math.floor((tonumber(CFG.SilentRate) or 0.12) * 100 + 0.5), 8, 30),
-        Suffix = " x10ms",
-        Callback = function(v) CFG.SilentRate = v / 100 end })
-    local aimDrop = C:CreateDropdown({
-        Name = "Who to aim at",
-        Flag = "PE_SilentTeamPick",
-        Options = teamOpts(),
-        CurrentOption = { CFG.SilentTeam },
-        MultipleOptions = false,
-        Callback = function(selected)
-            local picked = selected
-            if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then
-                CFG.SilentTeam = picked
-                print("[PE] aim target: " .. picked)
-            end
-        end,
-    })
-    teamPickers[#teamPickers + 1] = aimDrop
 
     C:CreateSection("Team & status")
     C:CreateButton({ Name = "Team: GUARD",
@@ -3852,14 +3329,6 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.FastRespawn = v end })
 
     C:CreateSection("Movement")
-    C:CreateToggle({ Name = "Spinbot (spin yourself)",
-        Flag = "PE_Spin",
-        CurrentValue = CFG.Spin == true,
-        Callback = function(v) CFG.Spin = v end })
-    C:CreateSlider({ Name = "Spin speed (deg/frame)", Flag = "PE_SpinSpeed",
-        Range = {5, 180}, Increment = 5,
-        CurrentValue = math.clamp(tonumber(CFG.SpinSpeed) or 30, 5, 180),
-        Callback = function(v) CFG.SpinSpeed = v end })
     C:CreateToggle({ Name = "Anti-stun (taser/cuffs/ragdoll)", Flag = "PE_AntiStun",
         CurrentValue = CFG.AntiStun ~= false,
         Callback = function(v) CFG.AntiStun = v end })
@@ -3934,7 +3403,7 @@ local okGUI, errGUI = pcall(function()
             end })
         ST:CreateSection("Info")
         ST:CreateParagraph({ Title = "Version",
-            Content = "PRISON ESP v2.35. ESP + Combat. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.TeamOf(name), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.Tase(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo(), PE.TexAll(), PE.TexRestore()." })
+            Content = "PRISON ESP v2.37. ESP + Combat. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.TeamOf(name), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
@@ -4172,15 +3641,7 @@ G.PE_Stop = function()
         Screen = nil
     end)
     pcall(function() clickConn:Disconnect() end)
-    pcall(function() mouseConn1:Disconnect() end)
-    pcall(function() mouseConn2:Disconnect() end)
     pcall(function() auraConn:Disconnect() end)
-    pcall(function() spinConn:Disconnect() end)
-    pcall(function()
-        local hum = LP.Character
-            and LP.Character:FindFirstChildOfClass("Humanoid")
-        if hum then hum.AutoRotate = true end
-    end)
     pcall(function() paConn:Disconnect() end)
     pcall(function() prConn:Disconnect() end)
     pcall(function() diedConn:Disconnect() end)
@@ -4191,10 +3652,7 @@ G.PE_Stop = function()
     G.PE.Escape = nil
     G.PE.EscapeTrip = nil
     G.PE.WearOutfit, G.PE.ShopInfo = nil, nil
-    pcall(function() G.PE.TexRestore() end)
-    G.PE.TexAll, G.PE.TexRestore = nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
-    G.PE.Tase = nil
     G.PE.FakeShot = nil
     local rfOld = Rayfield
     Rayfield = nil
@@ -4202,10 +3660,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.36 stopped")
+    print("[PE] v2.37 stopped")
 end
 
-print("[PE] v2.36 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.37 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
