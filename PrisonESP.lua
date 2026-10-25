@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.41
+--  PRISON ESP  v2.42
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -184,6 +184,13 @@ CFG.Immortal = CFG.Immortal == true
 CFG.C00lMode = CFG.C00lMode == true
 CFG.C00lDamage = tonumber(CFG.C00lDamage) or 3
 CFG.C00lTeam = pickOpt(CFG.C00lTeam, { "Everyone" }, "Everyone")
+-- ОГНЕННАЯ КИСТЬ: сервер вешает огонь на 2-й аргумент InflictTarget.
+-- Если он не проверяет принадлежность части жертве — можно передать
+-- блок стены/пола и РИСОВАТЬ ОГНЁМ курсором. Носитель урона —
+-- ближайший враг (урон 1). Если сервер проверяет — огонь останется
+-- на враге, просто не получится.
+CFG.FirePaint = CFG.FirePaint == true
+local paintAt = 0
 -- МГНОВЕННЫЙ РЕВАЙН: умер — сами шлём ResetToMenuEvent и возвращаемся
 -- в прошлую команду. Даунтайм ~1.5с вместо стандартного респавна.
 CFG.FastRespawn = CFG.FastRespawn == true
@@ -2626,6 +2633,46 @@ local function auraTick()
         end
     end
 
+    -- ОГНЕННАЯ КИСТЬ: часть под курсором + ближайший враг-носитель.
+    -- Каждые 0.35с обновляем огонь (Duration сервера конечен).
+    if CFG.FirePaint and now - paintAt >= 0.35 then
+        paintAt = now
+        local remoteP = myGunRemote("InflictTarget")
+        local mP = LP:GetMouse()
+        local partP = mP and mP.Target
+        if remoteP and partP and partP:IsA("BasePart")
+           and partP:IsDescendantOf(workspace) then
+            -- Носитель: ближайший живой враг (урон всего 1).
+            local rootP2 = LP.Character
+                and LP.Character:FindFirstChild("HumanoidRootPart")
+            local carrier, carrierD
+            for _, p2 in ipairs(Players:GetPlayers()) do
+                if p2 ~= LP then
+                    local ch2 = p2.Character
+                    local h2 = ch2 and ch2:FindFirstChildOfClass("Humanoid")
+                    local r2 = ch2 and ch2:FindFirstChild("HumanoidRootPart")
+                    if ch2 and h2 and h2.Health > 0 and r2
+                       and not ch2:FindFirstChildOfClass("ForceField") then
+                        local d2 = rootP2
+                            and (r2.Position - rootP2.Position).Magnitude or 0
+                        if not carrierD or d2 < carrierD then
+                            carrier, carrierD = h2, d2
+                        end
+                    end
+                end
+            end
+            if carrier then
+                pcall(function()
+                    remoteP:FireServer(carrier, partP, 1,
+                        Vector3.new(0, 1, 0), 0, 0, true)
+                end)
+            elseif os.clock() - (CFG._noPaintWarnAt or 0) > 10 then
+                CFG._noPaintWarnAt = os.clock()
+                warn("[PE PAINT] no enemy alive to carry the fire")
+            end
+        end
+    end
+
     -- БЕССМЕРТИЕ: вампиризм без жертвы. Хилим РЕАКТИВНО — как только
     -- HP упал (каждый кадр проверяем), плюс держим тонус раз в 0.15с.
     -- Против ваншотов (100+ за один пакет) спасает только убийство
@@ -2903,7 +2950,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.41",
+        LoadingSubtitle = "ESP + Combat v2.42",
         -- Сохранение настроек Rayfield: включаем только если в
         -- исполнителе есть файловая система (сам Rayfield проверит
         -- и предупредит, если нет). Наши дефолты живут в getgenv().
@@ -3030,6 +3077,7 @@ local okGUI, errGUI = pcall(function()
         ["Slow burn EVERYONE (server-wide fire)"] = "Сожжение ВСЕХ (огонь на весь сервер)",
         ["Burn damage per tick"] = "Урон горения за тик",
         ["Who burns"] = "Кто горит",
+        ["Fire paint (draw with fire at cursor)"] = "Огненная кисть (рисуй огнём курсором)",
         ["Decal image id (your photo)"] = "ID картинки (твоё фото)",
         ["REPLACE ALL TEXTURES (sky + every wall)"] = "ЗАМЕНИТЬ ВСЕ ТЕКСТУРЫ (небо + стены)",
         ["RESTORE textures"] = "ВОССТАНОВИТЬ текстуры",
@@ -3484,6 +3532,10 @@ local okGUI, errGUI = pcall(function()
         end,
     })
     teamPickers[#teamPickers + 1] = burnDrop
+    C:CreateToggle({ Name = "Fire paint (draw with fire at cursor)",
+        Flag = "PE_FirePaint",
+        CurrentValue = CFG.FirePaint == true,
+        Callback = function(v) CFG.FirePaint = v end })
 
     C:CreateSection("Team & status")
     C:CreateButton({ Name = "Team: GUARD",
@@ -3862,10 +3914,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.41 stopped")
+    print("[PE] v2.42 stopped")
 end
 
-print("[PE] v2.41 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.42 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
