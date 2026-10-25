@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.14
+--  PRISON ESP  v2.15
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -142,6 +142,23 @@ CFG.ModGunDamage = tonumber(CFG.ModGunDamage) or 250
 -- Подброс жертв — 5-й аргумент (отдача вверх).
 CFG.AuraLifesteal = CFG.AuraLifesteal ~= false
 CFG.AuraFling = CFG.AuraFling == true
+-- ПРОКАЧКА v2: полный список полей Setting-модуля (из Studio-копии
+-- игры): хедшот-множитель, дробовик, очередь, взрывные пули.
+CFG.GunHeadshot = tonumber(CFG.GunHeadshot) or 500
+CFG.GunShotgun = CFG.GunShotgun ~= false
+CFG.GunPellets = tonumber(CFG.GunPellets) or 8
+CFG.GunBurst = tonumber(CFG.GunBurst) or 10
+CFG.GunExplosive = CFG.GunExplosive ~= false
+CFG.GunBoomRadius = tonumber(CFG.GunBoomRadius) or 25
+-- ТАЗЕР: клиент шлёт Taser.RemoteEvent:FireServer(ПОЗИЦИЯ) — сервер
+-- станит того, кто стоит у позиции. 5-секундный кулдаун в клиенте —
+-- шлём напрямую и без него.
+CFG.TaserAura = CFG.TaserAura == true
+CFG.TaserDelay = tonumber(CFG.TaserDelay) or 0.7
+CFG.TaserTeam = pickOpt(CFG.TaserTeam, {
+    "Everyone", "Except my team",
+    "Enemies (guards vs prisoners)", "Only guards", "Only prisoners" },
+    "Except my team")
 
 local STOPPED = false
 local Rayfield
@@ -1873,7 +1890,7 @@ G.PE.ModGun = function(dmg)
     end
     S.BaseDamage = dmg
     S.HeadshotEnabled = true
-    S.HeadshotDamageMultiplier = 3
+    S.HeadshotDamageMultiplier = tonumber(CFG.GunHeadshot) or 500
     S.Auto = true
     S.FireRate = 0.05
     S.BurstRate = 0.05
@@ -1883,8 +1900,66 @@ G.PE.ModGun = function(dmg)
     S.DelayBeforeFiring = 0
     S.DelayAfterFiring = 0
     S.CameraShakingEnabled = false
+    -- Дробовик: N пуль за выстрел (урон умножается).
+    if CFG.GunShotgun then
+        S.ShotgunEnabled = true
+        S.BulletPerShot = tonumber(CFG.GunPellets) or 8
+    end
+    -- Очередь: N пуль за клик.
+    S.BurstFireEnabled = true
+    S.BulletPerBurst = tonumber(CFG.GunBurst) or 10
+    S.BurstRate = 0.03
+    -- Взрывные пули: урон по площади.
+    if CFG.GunExplosive then
+        S.ExplosiveEnabled = true
+        S.Radius = tonumber(CFG.GunBoomRadius) or 25
+    end
+    S.Lifesteal = CFG.AuraLifesteal and 1000 or 0
     print("[PE MOD] " .. tool.Name .. " upgraded: damage " .. dmg
-        .. ", auto, no spread, reload 0.5s")
+        .. ", headshot x" .. (tonumber(CFG.GunHeadshot) or 500)
+        .. (CFG.GunShotgun and (", shotgun " .. (tonumber(CFG.GunPellets) or 8)
+            .. " pellets") or "")
+        .. (CFG.GunExplosive and (", explosive r"
+            .. (tonumber(CFG.GunBoomRadius) or 25)) or "")
+        .. ", auto, no spread")
+end
+
+-- ТАЗЕР: клиент бьёт RemoteEvent:FireServer(ПОЗИЦИЯ). Возвращает
+-- тул и ремоут, если Taser в руках/рюкзаке.
+local function findTaser()
+    local pools = { LP.Character, LP:FindFirstChild("Backpack") }
+    for _, pool in ipairs(pools) do
+        if pool then
+            for _, t in ipairs(pool:GetChildren()) do
+                if t:IsA("Tool") and t.Name:lower():find("taser") then
+                    local ev = t:FindFirstChild("RemoteEvent")
+                    if ev then return t, ev end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+G.PE.Tase = function(name)
+    name = name or CFG._target
+    local t, ev = findTaser()
+    if not t or not ev then
+        print("[PE TASE] no Taser tool in hands/backpack (GUARD team)")
+        return
+    end
+    local p = name and findPlayer(name)
+    local r5 = p and p.Character
+        and p.Character:FindFirstChild("HumanoidRootPart")
+    if not p or not r5 then
+        print("[PE TASE] target not found: " .. tostring(name))
+        return
+    end
+    for _ = 1, 3 do
+        pcall(function() ev:FireServer(r5.Position) end)
+        task.wait(0.12)
+    end
+    print("[PE TASE] " .. p.Name .. " tased x3 (position shots)")
 end
 
 -- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
@@ -1944,9 +2019,10 @@ local function targetAllowed(p, mode, myTeam)
     return true
 end
 
--- Цикл: cuff-аура, анти-стан, килл-аура (вампиризм/подброс).
+-- Цикл: cuff-аура, тазер-аура, анти-стан, килл-аура.
 local auraAt = 0
 local cuffAt = 0
+local taserAt = 0
 local stunAt = 0
 local function auraTick()
     local now = os.clock()
@@ -1988,6 +2064,38 @@ local function auraTick()
                     end
                 end
             end
+        end
+    end
+
+    -- ТАЗЕР-АУРА: шлём позиции врагов в Taser.RemoteEvent — сервер
+    -- станит того, кто у позиции. Радиус = радиусу килл-ауры.
+    if CFG.TaserAura and now - taserAt >= (tonumber(CFG.TaserDelay) or 0.7) then
+        taserAt = now
+        local t, ev = findTaser()
+        if t and ev then
+            local rootT = LP.Character
+                and LP.Character:FindFirstChild("HumanoidRootPart")
+            if rootT then
+                local fired = 0
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LP and fired < 5 then
+                        local ch4 = p.Character
+                        local h4 = ch4 and ch4:FindFirstChildOfClass("Humanoid")
+                        local r4 = ch4 and ch4:FindFirstChild("HumanoidRootPart")
+                        if ch4 and h4 and h4.Health > 0 and r4
+                           and targetAllowed(p,
+                               CFG.TaserTeam or "Except my team", LP.Team)
+                           and (r4.Position - rootT.Position).Magnitude
+                               <= (tonumber(CFG.KillAuraRadius) or 40) then
+                            fired = fired + 1
+                            pcall(function() ev:FireServer(r4.Position) end)
+                        end
+                    end
+                end
+            end
+        elseif os.clock() - (CFG._noTaserWarnAt or 0) > 10 then
+            CFG._noTaserWarnAt = os.clock()
+            warn("[PE] taser aura: no Taser tool (switch to GUARD)")
         end
     end
 
@@ -2188,7 +2296,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.14",
+        LoadingSubtitle = "ESP + Combat v2.15",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2531,8 +2639,60 @@ local okGUI, errGUI = pcall(function()
         Range = {10, 10000}, Increment = 10,
         CurrentValue = math.clamp(tonumber(CFG.ModGunDamage) or 250, 10, 10000),
         Callback = function(v) CFG.ModGunDamage = v end })
+    C:CreateSlider({ Name = "Headshot multiplier", Flag = "PE_GunHeadshot",
+        Range = {2, 1000}, Increment = 1,
+        CurrentValue = math.clamp(tonumber(CFG.GunHeadshot) or 500, 2, 1000),
+        Callback = function(v) CFG.GunHeadshot = v end })
+    C:CreateSlider({ Name = "Burst bullets per click", Flag = "PE_GunBurst",
+        Range = {1, 15}, Increment = 1,
+        CurrentValue = math.clamp(tonumber(CFG.GunBurst) or 10, 1, 15),
+        Callback = function(v) CFG.GunBurst = v end })
+    C:CreateToggle({ Name = "Shotgun mode (pellets per shot)",
+        Flag = "PE_GunShotgun",
+        CurrentValue = CFG.GunShotgun ~= false,
+        Callback = function(v) CFG.GunShotgun = v end })
+    C:CreateSlider({ Name = "Shotgun pellets", Flag = "PE_GunPellets",
+        Range = {2, 16}, Increment = 1,
+        CurrentValue = math.clamp(tonumber(CFG.GunPellets) or 8, 2, 16),
+        Callback = function(v) CFG.GunPellets = v end })
+    C:CreateToggle({ Name = "Explosive bullets (AoE)", Flag = "PE_GunExplosive",
+        CurrentValue = CFG.GunExplosive ~= false,
+        Callback = function(v) CFG.GunExplosive = v end })
+    C:CreateSlider({ Name = "Explosion radius", Flag = "PE_GunBoomRadius",
+        Range = {5, 60}, Increment = 5,
+        CurrentValue = math.clamp(tonumber(CFG.GunBoomRadius) or 25, 5, 60),
+        Callback = function(v) CFG.GunBoomRadius = v end })
     C:CreateButton({ Name = "UPGRADE gun in hands",
         Callback = function() G.PE.ModGun() end })
+
+    C:CreateSection("Taser (stun)")
+    C:CreateParagraph({ Title = "Taser",
+        Content = "The taser client sends RemoteEvent:FireServer(POSITION) - the server stuns whoever stands at that position, the 5s cooldown is client-only. Aura spams enemy positions around you (radius = kill aura radius). Needs the Taser tool: switch to GUARD first." })
+    C:CreateToggle({ Name = "Taser aura (stun everyone near)",
+        Flag = "PE_TaserAura",
+        CurrentValue = CFG.TaserAura == true,
+        Callback = function(v) CFG.TaserAura = v end })
+    C:CreateSlider({ Name = "Taser delay", Flag = "PE_TaserDelay",
+        Range = {10, 200}, Increment = 10,
+        CurrentValue = math.clamp(
+            math.floor((tonumber(CFG.TaserDelay) or 0.7) * 100 + 0.5), 10, 200),
+        Suffix = " x10ms",
+        Callback = function(v) CFG.TaserDelay = v / 100 end })
+    C:CreateDropdown({
+        Name = "Who to tase",
+        Flag = "PE_TaserTeamPick",
+        Options = { "Everyone", "Except my team",
+            "Enemies (guards vs prisoners)", "Only guards", "Only prisoners" },
+        CurrentOption = { CFG.TaserTeam },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG.TaserTeam = picked end
+        end,
+    })
+    C:CreateButton({ Name = "TASE selected player (x3)",
+        Callback = function() G.PE.Tase(CFG._target) end })
 
     C:CreateSection("Team & status")
     C:CreateButton({ Name = "Team: GUARD",
@@ -2795,16 +2955,17 @@ G.PE_Stop = function()
     G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
+    G.PE.Tase = nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.14 stopped")
+    print("[PE] v2.15 stopped")
 end
 
-print("[PE] v2.14 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.15 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
