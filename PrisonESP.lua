@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.25
+--  PRISON ESP  v2.26
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -158,6 +158,14 @@ CFG.GunBurst = tonumber(CFG.GunBurst) or 10
 CFG.GunExplosive = CFG.GunExplosive ~= false
 CFG.GunBoomRadius = tonumber(CFG.GunBoomRadius) or 25
 CFG.GunLifesteal = CFG.GunLifesteal ~= false
+-- ХАК ПАТРОНОВ: перезарядка читает Setting.AmmoPerClip в момент
+-- отправки пакета (после wait(ReloadTime)) — подсунутый 1e9 уходит
+-- серверу ВНУТРИ честной перезарядки. Если сервер сверяет со своей
+-- копией Setting — пушка зависнет пустой (переложи её в руки).
+CFG.GunAmmoHack = CFG.GunAmmoHack == true
+-- Снайперский прицел на ЛЮБОЙ пушке: Setting.SniperEnabled, зум
+-- по клавише E (FieldOfView из Setting).
+CFG.GunScope = CFG.GunScope == true
 -- ТАЗЕР: клиент шлёт Taser.RemoteEvent:FireServer(ПОЗИЦИЯ) — сервер
 -- станит того, кто стоит у позиции. 5-секундный кулдаун в клиенте —
 -- шлём напрямую и без него.
@@ -2171,6 +2179,17 @@ G.PE.ModGun = function(dmg)
         S.BulletPerBurst = math.min(S.BulletPerBurst, 3)
     end
     S.Lifesteal = CFG.GunLifesteal ~= false and 1000 or 0
+    -- Снайперский зум: E включает прицел (FOV из Setting.FieldOfView).
+    if CFG.GunScope then
+        S.SniperEnabled = true
+        if not tonumber(S.FieldOfView) or S.FieldOfView >= 70 then
+            S.FieldOfView = 18
+        end
+    end
+    -- Патроны: следующая ЧЕСТНАЯ перезарядка унесёт серверу 1e9.
+    if CFG.GunAmmoHack then
+        S.AmmoPerClip = 1000000000
+    end
     pcall(function() tool:SetAttribute("PE_Marked", true) end)
     print("[PE MOD] " .. tool.Name .. " upgraded: damage " .. dmg
         .. ", headshot x" .. (tonumber(CFG.GunHeadshot) or 500)
@@ -2773,7 +2792,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.25",
+        LoadingSubtitle = "ESP + Combat v2.26",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3143,6 +3162,14 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_GunLifesteal",
         CurrentValue = CFG.GunLifesteal ~= false,
         Callback = function(v) CFG.GunLifesteal = v end })
+    C:CreateToggle({ Name = "Sniper scope on any gun (E key)",
+        Flag = "PE_GunScope",
+        CurrentValue = CFG.GunScope == true,
+        Callback = function(v) CFG.GunScope = v end })
+    C:CreateToggle({ Name = "Ammo hack: 1e9 clip via real reload (test)",
+        Flag = "PE_GunAmmoHack",
+        CurrentValue = CFG.GunAmmoHack == true,
+        Callback = function(v) CFG.GunAmmoHack = v end })
     C:CreateSlider({ Name = "Headshot multiplier", Flag = "PE_GunHeadshot",
         Range = {2, 200}, Increment = 1,
         CurrentValue = math.clamp(tonumber(CFG.GunHeadshot) or 500, 2, 200),
@@ -3555,10 +3582,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.25 stopped")
+    print("[PE] v2.26 stopped")
 end
 
-print("[PE] v2.25 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.26 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
