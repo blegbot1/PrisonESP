@@ -1240,11 +1240,10 @@ G.PE.TeamOf = function(p) return roleOf(p) end
 -- ============================================================
 --  ДОБАВЛЕНИЕ / УДАЛЕНИЕ ИГРОКОВ
 -- ============================================================
--- Троттлы на игрока (поджог/подброс/тазер). Слабые ключи: ушедшие
--- игроки не копятся, при выходе чистим руками для мгновенности.
+-- Троттлы на игрока (поджог/подброс). Слабые ключи: ушедшие игроки
+-- не копятся, при выходе чистим руками для мгновенности.
 local PE_BURN_AT = setmetatable({}, { __mode = "k" })
 local PE_FLING_AT = setmetatable({}, { __mode = "k" })
-local PE_TASE_AT = setmetatable({}, { __mode = "k" })
 
 local function removePlayer(plr)
     local e = by[plr]
@@ -1254,7 +1253,6 @@ local function removePlayer(plr)
     by[plr] = nil
     PE_BURN_AT[plr] = nil
     PE_FLING_AT[plr] = nil
-    PE_TASE_AT[plr] = nil
 end
 
 local function addPlayer(plr)
