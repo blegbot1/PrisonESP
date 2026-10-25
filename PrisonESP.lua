@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.46
+--  PRISON ESP  v2.47
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -2771,86 +2771,98 @@ local function auraTick()
     end
 
     -- АПОКАЛИПСИС: автоматическая убивалка.
-    -- 1) Вышка: анкор себя +400 стадов вверх один раз при включении —
-    --    не достанут (сервер дистанцию урона не проверяет).
-    -- 2) Смена команды Prisoner<->Escaped каждую секунду: каждый игрок
-    --    по очереди становится врагом — серверный тим-чек обходим.
-    -- 3) Автоподбор M9, если пушки нет (гивер слетает на вышку).
-    -- 4) Урон 100 + огонь всем, тик 0.5с.
+    -- 1) ВЫШКА: сервер при смене команды РЕСПАВНИТ нас на спавн
+    --    команды (пушка выпадает) — поэтому вышку держим ПОСТОЯННО:
+    --    каждый цикл проверяем «мы якорнуты и на высоте», нет —
+    --    возвращаем на сохранённую точку вышки.
+    -- 2) ОРУЖИЕ: после каждого респавна пушка выпадает — авто-гивер
+    --    берёт M9. Пока оружия нет — команды НЕ переключаем.
+    -- 3) Только когда вышка + пушка на месте: смена команды раз в
+    --    секунду (каждый по очереди враг) + урон 100 + огонь всем.
     if CFG.Apocalypse then
-        local rootA = LP.Character
-            and LP.Character:FindFirstChild("HumanoidRootPart")
-        if rootA and not CFG._apocPerched then
-            CFG._apocPerched = true
-            pcall(function()
-                rootA.Anchored = true
-                rootA.CFrame = rootA.CFrame
-                    + Vector3.new(0, 400, 0)
-            end)
-            print("[PE APOC] perched 400 studs up - safe spot")
-        end
-        -- Смена команды раз в секунду.
-        if now - (CFG._apocTeamAt or 0) >= 1 then
-            CFG._apocTeamAt = now
-            CFG._apocTeamFlip = not CFG._apocTeamFlip
-            local rT = ReplicatedStorage:FindFirstChild("ChooseTeamEvent")
-            if rT then
+        local chrA = LP.Character
+        local rootA = chrA and chrA:FindFirstChild("HumanoidRootPart")
+        if chrA and rootA then
+            -- Точка вышки: сохраняем при первом включении.
+            if not CFG._apocPerchCF then
+                CFG._apocPerchCF = rootA.CFrame + Vector3.new(0, 400, 0)
+                print("[PE APOC] perch point saved (+400 studs)")
+            end
+            local perched = rootA.Anchored
+                and math.abs(rootA.Position.Y
+                    - CFG._apocPerchCF.Position.Y) < 30
+            if not perched then
                 pcall(function()
-                    rT:FireServer(CFG._apocTeamFlip and "Escaped"
-                        or "Prisoner")
+                    rootA.Anchored = true
+                    rootA.CFrame = CFG._apocPerchCF
                 end)
             end
-        end
-        -- Автоподбор M9.
-        if not myGunRemote("InflictTarget")
-           and os.clock() - (CFG._apocGiveAt or 0) > 6 then
-            CFG._apocGiveAt = os.clock()
-            G.PE.Give("M9")
-        end
-        -- Убийственный цикл: все, урон 100, огонь.
-        if now - apocAt >= 0.5 then
-            apocAt = now
-            local remoteA = myGunRemote("InflictTarget")
-            if remoteA then
-                local dmgA = math.clamp(
-                    tonumber(CFG.ApocDamage) or 100, 1, 200)
-                local hitsA = 0
-                for _, p2 in ipairs(Players:GetPlayers()) do
-                    if p2 ~= LP and hitsA < 20 then
-                        local ch2 = p2.Character
-                        local h2 = ch2
-                            and ch2:FindFirstChildOfClass("Humanoid")
-                        local head2 = ch2
-                            and (ch2:FindFirstChild("Head")
-                                or ch2:FindFirstChild("HumanoidRootPart"))
-                        if ch2 and h2 and h2.Health > 0 and head2
-                           and not ch2:FindFirstChildOfClass("ForceField") then
-                            hitsA = hitsA + 1
-                            local bt = PE_BURN_AT[p2]
-                            local burnA = (not bt or now - bt > 1.5)
-                            if burnA then PE_BURN_AT[p2] = now end
-                            pcall(function()
-                                remoteA:FireServer(h2, head2, dmgA,
-                                    Vector3.new(0, 1, 0), 0, 0, burnA)
-                            end)
+            -- Оружие: после респавна выпало — берём заново.
+            local hasGun = myGunRemote("InflictTarget") ~= nil
+            if not hasGun then
+                if os.clock() - (CFG._apocGiveAt or 0) > 8 then
+                    CFG._apocGiveAt = os.clock()
+                    G.PE.Give("M9")
+                end
+            else
+                -- Вышка + пушка на месте: можно воевать.
+                if now - (CFG._apocTeamAt or 0) >= 1 then
+                    CFG._apocTeamAt = now
+                    CFG._apocTeamFlip = not CFG._apocTeamFlip
+                    local rT = ReplicatedStorage
+                        :FindFirstChild("ChooseTeamEvent")
+                    if rT then
+                        pcall(function()
+                            rT:FireServer(CFG._apocTeamFlip and "Escaped"
+                                or "Prisoner")
+                        end)
+                    end
+                end
+                if now - apocAt >= 0.5 then
+                    apocAt = now
+                    local remoteA = myGunRemote("InflictTarget")
+                    if remoteA then
+                        local dmgA = math.clamp(
+                            tonumber(CFG.ApocDamage) or 100, 1, 200)
+                        local hitsA = 0
+                        for _, p2 in ipairs(Players:GetPlayers()) do
+                            if p2 ~= LP and hitsA < 20 then
+                                local ch2 = p2.Character
+                                local h2 = ch2
+                                    and ch2:FindFirstChildOfClass("Humanoid")
+                                local head2 = ch2
+                                    and (ch2:FindFirstChild("Head")
+                                        or ch2:FindFirstChild(
+                                            "HumanoidRootPart"))
+                                if ch2 and h2 and h2.Health > 0 and head2
+                                   and not ch2:FindFirstChildOfClass(
+                                       "ForceField") then
+                                    hitsA = hitsA + 1
+                                    local bt = PE_BURN_AT[p2]
+                                    local burnA = (not bt or now - bt > 1.5)
+                                    if burnA then PE_BURN_AT[p2] = now end
+                                    pcall(function()
+                                        remoteA:FireServer(h2, head2, dmgA,
+                                            Vector3.new(0, 1, 0), 0, 0,
+                                            burnA)
+                                    end)
+                                end
+                            end
                         end
                     end
                 end
             end
         end
     else
-        -- Выключили: отанкориваем и возвращаемся на землю.
-        if CFG._apocPerched then
-            CFG._apocPerched = nil
+        -- Выключили: отанкориваем (респавн и так вернёт на землю).
+        if CFG._apocPerchCF or CFG._apocPerched then
+            CFG._apocPerchCF = nil
             local rootA = LP.Character
                 and LP.Character:FindFirstChild("HumanoidRootPart")
             if rootA then
-                pcall(function()
-                    rootA.Anchored = false
-                    rootA.CFrame = rootA.CFrame - Vector3.new(0, 400, 0)
-                end)
+                pcall(function() rootA.Anchored = false end)
             end
-            print("[PE APOC] perch released, back to the ground")
+            print("[PE APOC] perch released")
         end
     end
 
@@ -3185,7 +3197,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.46",
+        LoadingSubtitle = "ESP + Combat v2.47",
         -- Сохранение настроек Rayfield: включаем только если в
         -- исполнителе есть файловая система (сам Rayfield проверит
         -- и предупредит, если нет). Наши дефолты живут в getgenv().
@@ -4266,13 +4278,12 @@ G.PE_Stop = function()
     pcall(function() G.PE.FPSBoost(false) end)
     G.PE.FPSBoost = nil
     pcall(function()
-        if CFG._apocPerched then
-            CFG._apocPerched = nil
+        if CFG._apocPerchCF then
+            CFG._apocPerchCF = nil
             local rootP2 = LP.Character
                 and LP.Character:FindFirstChild("HumanoidRootPart")
             if rootP2 then
                 rootP2.Anchored = false
-                rootP2.CFrame = rootP2.CFrame - Vector3.new(0, 400, 0)
             end
         end
     end)
@@ -4282,10 +4293,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.46 stopped")
+    print("[PE] v2.47 stopped")
 end
 
-print("[PE] v2.46 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.47 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
