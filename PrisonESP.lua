@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.11
+--  PRISON ESP  v2.12
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -16,7 +16,7 @@
 
 local G = getgenv()
 if G.PE_LOADED_AT and (os.clock() - G.PE_LOADED_AT) < 5 then
-    warn("[PE] только что запущен, подожди 5 сек")
+    warn("[PE] just started, wait 5 sec")
     return
 end
 -- Повторный запуск: глушим прошлый экземпляр, иначе двойные ауры/плашки.
@@ -50,8 +50,8 @@ local function pickOpt(v, list, def)
     return def
 end
 
-local BOX_STYLES    = { "Рамка", "Уголки", "3D-коробка" }
-local TRACER_ORIGINS = { "Центр", "Низ экрана", "Верх экрана" }
+local BOX_STYLES    = { "Frame", "Corners", "3D box" }
+local TRACER_ORIGINS = { "Center", "Bottom", "Top" }
 
 -- ---------- ESP: роли ----------
 CFG.PlayerESP     = CFG.PlayerESP     ~= false   -- ESP прочих
@@ -82,7 +82,7 @@ CFG.BoxThick  = math.clamp(tonumber(CFG.BoxThick) or 2, 1, 6)
 CFG.BoxPad    = tonumber(CFG.BoxPad) or 4
 CFG.BoxMargin = math.clamp(tonumber(CFG.BoxMargin) or 0, 0, 10)
 CFG.BoxAlpha  = math.clamp(tonumber(CFG.BoxAlpha) or 0, 0, 0.9)
-CFG.BoxStyle  = pickOpt(CFG.BoxStyle, BOX_STYLES, "3D-коробка")
+CFG.BoxStyle  = pickOpt(CFG.BoxStyle, BOX_STYLES, "3D box")
 CFG.DistFade  = CFG.DistFade == true
 
 -- ---------- ESP: визуалы ----------
@@ -100,7 +100,7 @@ CFG.HeadBoxRole   = CFG.HeadBoxRole ~= false
 CFG.HeadBoxColor  = safeColor(CFG.HeadBoxColor, Color3.new(1, 0, 0))
 CFG.Snaplines     = CFG.Snaplines ~= false
 CFG.SnapArrowThick = math.clamp(tonumber(CFG.SnapArrowThick) or 2, 1, 6)
-CFG.SnapFrom      = pickOpt(CFG.SnapFrom, TRACER_ORIGINS, "Низ экрана")
+CFG.SnapFrom      = pickOpt(CFG.SnapFrom, TRACER_ORIGINS, "Bottom")
 CFG.SnapAlpha     = math.clamp(tonumber(CFG.SnapAlpha) or 1, 0, 1)
 CFG.OffArrows     = CFG.OffArrows ~= false
 -- Кольцо под целью: по умолчанию ВЫКЛ (круги под ногами у всех
@@ -122,14 +122,14 @@ CFG.KillAura       = CFG.KillAura == true
 CFG.KillAuraRadius = tonumber(CFG.KillAuraRadius) or 40
 CFG.KillAuraDelay  = tonumber(CFG.KillAuraDelay) or 0.15
 CFG.KillAuraTeam   = pickOpt(CFG.KillAuraTeam, {
-    "Все", "Кроме своей команды", "Только своя команда",
-    "Враги (охрана↔зеки)", "Только охрана", "Только заключённые",
-    "Выбранный игрок" }, "Все")
+    "Everyone", "Except my team", "Only my team",
+    "Enemies (guards vs prisoners)", "Only guards", "Only prisoners",
+    "Selected player" }, "Everyone")
 -- НАРУЧНИКИ: CuffEvent сковывает игрока. Handcuffs выдаются за
 -- GUARD (команда переключается мгновенно кнопкой).
 CFG.CuffAura = CFG.CuffAura == true
 CFG.CuffTeam = pickOpt(CFG.CuffTeam, {
-    "Все", "Кроме своей команды" }, "Кроме своей команды")
+    "Everyone", "Except my team" }, "Except my team")
 -- PUNCH-АУРА: FistEvent("Punch") — сервер бьёт того, кто рядом.
 CFG.PunchAura = CFG.PunchAura == true
 CFG.PunchDelay = tonumber(CFG.PunchDelay) or 0.25
@@ -140,7 +140,7 @@ CFG.PunchTele  = CFG.PunchTele ~= false
 -- возвратов, максимальная частота. Дом вернём при выключении ауры.
 CFG.PunchStay  = CFG.PunchStay ~= false
 CFG.PunchTeam  = pickOpt(CFG.PunchTeam, {
-    "Все", "Кроме своей команды" }, "Кроме своей команды")
+    "Everyone", "Except my team" }, "Except my team")
 -- АНТИ-СТАН: тазер/наручники/регдолл не должны останавливать.
 CFG.AntiStun = CFG.AntiStun ~= false
 -- Урон килл-ауры и бесконечные патроны. Подписура InflictTarget взята
@@ -321,7 +321,7 @@ local function drawBox(b, root, cam)
     local trans = math.clamp(fade + alpha, 0, 1)
     local col = b.color or Color3.new(1, 1, 1)
     local thick = tonumber(CFG.BoxThick) or 2
-    local style = CFG.BoxStyle or "Рамка"
+    local style = CFG.BoxStyle or "Frame"
 
     local function setLine(i, a, c)
         local ln = b.lines[i]
@@ -341,7 +341,7 @@ local function drawBox(b, root, cam)
 
     -- 3D: 12 рёбер, каждое рисуется отдельно — угол за камерой прячет
     -- только своё ребро. Дальние рёбра бледнее и тоньше.
-    if style == "3D-коробка" then
+    if style == "3D box" then
         local idx = { {1,2},{2,3},{3,4},{4,1},{5,6},{6,7},{7,8},{8,5},
                       {1,5},{2,6},{3,7},{4,8} }
         for i = 1, 12 do
@@ -391,7 +391,7 @@ local function drawBox(b, root, cam)
         minY, maxY = mid - 9, mid + 9
     end
 
-    if style == "Уголки" then
+    if style == "Corners" then
         local len = math.clamp(math.min(maxX - minX, maxY - minY) * 0.28, 5, 26)
         local corners = {
             { Vector2.new(minX, minY), Vector2.new(minX + len, minY), Vector2.new(minX, minY + len) },
@@ -523,13 +523,13 @@ do
         if p.groundRing then nC = nC + 1 end
         if p.hpText then nT = nT + 1 end
     end
-    print(("[PE VIS] Drawing-объекты (3 слота): линии=%d квадраты=%d круги=%d текст=%d")
+    print(("[PE VIS] Drawing objects (3 slots): lines=%d squares=%d circles=%d text=%d")
         :format(nL, nS, nC, nT))
     if nS == 0 then
-        warn("[PE VIS] квадраты (Square) НЕ создались — полоски HP/рамки головы/миникарта работать не будут")
+        warn("[PE VIS] squares (Square) NOT created - HP bars/head frame/minimap will not work")
     end
     if nC == 0 then
-        warn("[PE VIS] круги (Circle) НЕ создались — кольцо под целью работать не будет")
+        warn("[PE VIS] circles (Circle) NOT created - target ring will not work")
     end
 end
 
@@ -555,8 +555,8 @@ local function vHideText(t) if t then t.Visible = false end end
 
 -- Откуда идёт линия на экране.
 local function screenOrigin(kind, cx, cy, vp)
-    if kind == "Низ экрана" then return Vector2.new(cx, vp.Y) end
-    if kind == "Верх экрана" then return Vector2.new(cx, 0) end
+    if kind == "Bottom" then return Vector2.new(cx, vp.Y) end
+    if kind == "Top" then return Vector2.new(cx, 0) end
     return Vector2.new(cx, cy)
 end
 
@@ -1228,7 +1228,7 @@ end)
 --  ГЛАВНЫЙ ЦИКЛ ESP
 -- ============================================================
 local ROLE_TAG = {
-    guard = "[ОХР]", prisoner = "[ЗЕК]", criminal = "[КРИМ]",
+    guard = "[GUARD]", prisoner = "[PRIS]", criminal = "[CRIM]",
 }
 
 mainConn = RunService.RenderStepped:Connect(function()
@@ -1393,12 +1393,12 @@ mainConn = RunService.RenderStepped:Connect(function()
         local okV, errV = pcall(VIS.update, cam, myRoot)
         if not okV and os.clock() - (CFG._visErrAt or 0) > 5 then
             CFG._visErrAt = os.clock()
-            warn("[PE VIS] ошибка кадра: " .. tostring(errV))
+            warn("[PE VIS] frame error: " .. tostring(errV))
         end
     end)
     if not ok and os.clock() - (CFG._frameErrAt or 0) > 5 then
         CFG._frameErrAt = os.clock()
-        warn("[PE] кадр ESP: " .. tostring(err))
+        warn("[PE] ESP frame: " .. tostring(err))
     end
 end)
 
@@ -1510,12 +1510,12 @@ G.PE.Guns = function()
                     end
                 end
             else
-                print("[PE GUN] " .. t.Name .. ": Setting не читается")
+                print("[PE GUN] " .. t.Name .. ": Setting unreadable")
             end
         end
     end
     if n == 0 then
-        print("[PE GUN] пушек с Setting нет в руках/рюкзаке — возьми оружие")
+        print("[PE GUN] no guns with Setting in hands/backpack - take a weapon")
     end
 end
 
@@ -1533,12 +1533,12 @@ G.PE.Remotes = function()
     scan(ReplicatedStorage)
     scan(LP:FindFirstChild("Backpack"))
     scan(LP.Character)
-    print("[PE REMOTE] всего: " .. n)
+    print("[PE REMOTE] total: " .. n)
 end
 
 G.PE.Probe = function(name, ...)
     local target = tostring(name or "")
-    if target == "" then print("[PE PROBE] укажи имя ремоута") return end
+    if target == "" then print("[PE PROBE] specify a remote name") return end
     local found = {}
     local function scan(root)
         if not root then return end
@@ -1554,11 +1554,11 @@ G.PE.Probe = function(name, ...)
     scan(LP:FindFirstChild("Backpack"))
     scan(LP.Character)
     if #found == 0 then
-        print("[PE PROBE] '" .. target .. "' не найден (см. PE.Remotes())")
+        print("[PE PROBE] '" .. target .. "' not found (see PE.Remotes())")
         return
     end
     for i, r in ipairs(found) do
-        print("[PE PROBE] найден: " .. tostring(r:GetFullName()))
+        print("[PE PROBE] found: " .. tostring(r:GetFullName()))
     end
     local ev = found[1]
     local args = table.pack(...)
@@ -1578,7 +1578,7 @@ G.PE.Probe = function(name, ...)
                 local v = a[i]
                 ps[#ps + 1] = type(v) == "table" and "{table}" or tostring(v)
             end
-            print("[PE PROBE] <- ответ: " .. table.concat(ps, " | "))
+            print("[PE PROBE] <- response: " .. table.concat(ps, " | "))
         end)
     end
     if ev:IsA("RemoteEvent") then
@@ -1591,7 +1591,7 @@ G.PE.Probe = function(name, ...)
     end
     task.delay(5, function()
         if listener then pcall(function() listener:Disconnect() end) end
-        print("[PE PROBE] окно '" .. target .. "' закрыто")
+        print("[PE PROBE] window '" .. target .. "' closed")
     end)
 end
 
@@ -1636,34 +1636,34 @@ end
 -- Второй аргумент (необяз.): имя части, по умолчанию Humanoid.
 G.PE.Hit = function(namePart, partName)
     if not namePart or namePart == "" then
-        print("[PE HIT] сначала выбери игрока в списке")
+        print("[PE HIT] pick a player from the list first")
         return
     end
     local plr = findPlayer(namePart)
     if not plr then
-        print("[PE HIT] игрок по '" .. tostring(namePart)
-            .. "' не найден (можно вводить часть ника)")
+        print("[PE HIT] player by '" .. tostring(namePart)
+            .. "' not found (partial names work)")
         return
     end
     local ch = plr.Character
     if not ch then
-        print("[PE HIT] у " .. plr.Name .. " нет персонажа")
+        print("[PE HIT] target " .. plr.Name .. " has no character")
         return
     end
     local hum = ch:FindFirstChildOfClass("Humanoid")
     local root = ch:FindFirstChild("HumanoidRootPart")
     if not hum or not root then
-        print("[PE HIT] у цели нет Humanoid/RootPart")
+        print("[PE HIT] target has no Humanoid/RootPart")
         return
     end
     local remote, tool = myGunRemote("InflictTarget")
     if not remote then
-        print("[PE HIT] нет пушки с InflictTarget в руках/рюкзаке — возьми оружие")
+        print("[PE HIT] no gun with InflictTarget in hands/backpack - take a weapon")
         return
     end
     print("[PE HIT] " .. tool.Name .. ".InflictTarget -> " .. plr.Name
-        .. " (точная подписура, урон " .. (tonumber(CFG.KillAuraDamage) or 50)
-        .. "). СМОТРИ HP ЦЕЛИ!")
+        .. " (exact signature, damage " .. (tonumber(CFG.KillAuraDamage) or 50)
+        .. "). WATCH TARGET HP!")
     pcall(function()
         remote:FireServer(hum, root, tonumber(CFG.KillAuraDamage) or 50,
             Vector3.new(0, 0, 1), 0, false, false)
@@ -1674,10 +1674,10 @@ end
 G.PE.Team = function(teamName)
     local r = ReplicatedStorage:FindFirstChild("ChooseTeamEvent")
     if not r or not r:IsA("RemoteEvent") then
-        print("[PE TEAM] ChooseTeamEvent не найден")
+        print("[PE TEAM] ChooseTeamEvent not found")
         return
     end
-    print("[PE TEAM] ChooseTeamEvent('" .. tostring(teamName) .. "'). СМОТРИ КОМАНДУ!")
+    print("[PE TEAM] ChooseTeamEvent('" .. tostring(teamName) .. "'). WATCH YOUR TEAM!")
     r:FireServer(teamName)
 end
 
@@ -1694,7 +1694,7 @@ local GIVE_ITEMS = {
 -- дистанцию и проверки.
 G.PE.Give = function(itemName)
     if type(fireclickdetector) ~= "function" then
-        warn("[PE GIVE] в этом исполнителе нет fireclickdetector")
+        warn("[PE GIVE] no fireclickdetector in this executor")
         return false
     end
     for _, m in ipairs(workspace:GetChildren()) do
@@ -1725,14 +1725,14 @@ G.PE.Give = function(itemName)
                     end
                 end
                 print("[PE GIVE] " .. itemName .. ": fireclickdetector -> "
-                    .. tostring(ok) .. (teleported and " (с подлётом)" or ""))
+                    .. tostring(ok) .. (teleported and " (with fly-in)" or ""))
                 return ok
             end
-            warn("[PE GIVE] у '" .. itemName .. "' нет ClickDetector")
+            warn("[PE GIVE] '" .. itemName .. "' has no ClickDetector")
             return false
         end
     end
-    print("[PE GIVE] модель '" .. tostring(itemName) .. "' на земле не найдена")
+    print("[PE GIVE] model '" .. tostring(itemName) .. "' not found on the ground")
     return false
 end
 
@@ -1742,19 +1742,19 @@ G.PE.GiveAll = function()
         if G.PE.Give(nm) then n = n + 1 end
         task.wait(0.25)
     end
-    print("[PE GIVE] выдано предметов: " .. n)
+    print("[PE GIVE] items given: " .. n)
 end
 
 -- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
 G.PE.Doors = function()
     if type(fireclickdetector) ~= "function" then
-        warn("[PE DOORS] нет fireclickdetector")
+        warn("[PE DOORS] no fireclickdetector")
         return
     end
     local n = 0
     local f = workspace:FindFirstChild("Doors")
     if not f then
-        print("[PE DOORS] папки Doors нет")
+        print("[PE DOORS] no Doors folder")
         return
     end
     for _, d in ipairs(f:GetDescendants()) do
@@ -1762,14 +1762,14 @@ G.PE.Doors = function()
             if pcall(fireclickdetector, d) then n = n + 1 end
         end
     end
-    print("[PE DOORS] кликнуто детекторов: " .. n)
+    print("[PE DOORS] detectors clicked: " .. n)
 end
 
 -- Сброс в меню: выход из наручников/ареста без смерти.
 G.PE.ResetMenu = function()
     local r = ReplicatedStorage:FindFirstChild("ResetToMenuEvent")
     if not r or not r:IsA("RemoteEvent") then
-        print("[PE MENU] ResetToMenuEvent не найден")
+        print("[PE MENU] ResetToMenuEvent not found")
         return
     end
     print("[PE MENU] ResetToMenuEvent:FireServer()")
@@ -1803,12 +1803,12 @@ end
 -- наручники/удар). Клиентский телепорт игра не проверяет.
 G.PE.TP = function(namePart)
     if not namePart or namePart == "" then
-        print("[PE TP] сначала выбери игрока в списке")
+        print("[PE TP] pick a player from the list first")
         return
     end
     local plr = findPlayer(namePart)
     if not plr then
-        print("[PE TP] игрок по '" .. tostring(namePart) .. "' не найден")
+        print("[PE TP] player by '" .. tostring(namePart) .. "' not found")
         return
     end
     local ch = plr.Character
@@ -1817,9 +1817,9 @@ G.PE.TP = function(namePart)
         and LP.Character:FindFirstChild("HumanoidRootPart")
     if root and myRoot then
         myRoot.CFrame = root.CFrame * CFrame.new(0, 0, 2.5)
-        print("[PE TP] телепорт за спину: " .. plr.Name)
+        print("[PE TP] teleport behind: " .. plr.Name)
     else
-        print("[PE TP] у цели нет персонажа")
+        print("[PE TP] target has no character")
     end
 end
 
@@ -1827,17 +1827,17 @@ end
 -- Handcuffs выдаются за GUARD — сначала кнопка команды.
 G.PE.Cuff = function(namePart)
     if not namePart or namePart == "" then
-        print("[PE CUFF] сначала выбери игрока в списке")
+        print("[PE CUFF] pick a player from the list first")
         return
     end
     local plr = findPlayer(namePart)
     if not plr then
-        print("[PE CUFF] игрок по '" .. tostring(namePart) .. "' не найден")
+        print("[PE CUFF] player by '" .. tostring(namePart) .. "' not found")
         return
     end
     local tool, equipped = findToolWith("CuffEvent")
     if not tool then
-        print("[PE CUFF] нет наручников: нажми «Команда: GUARD», заспавнься и возьми Handcuffs")
+        print("[PE CUFF] no handcuffs: press Team: GUARD, respawn and take Handcuffs")
         return
     end
     local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
@@ -1848,7 +1848,7 @@ G.PE.Cuff = function(namePart)
     local ev = tool:FindFirstChild("CuffEvent")
     local ch = plr.Character
     if not ev then
-        print("[PE CUFF] CuffEvent не найден в тулле")
+        print("[PE CUFF] CuffEvent not found in the tool")
         return
     end
     pcall(function() ev:FireServer(plr) end)
@@ -1859,7 +1859,7 @@ G.PE.Cuff = function(namePart)
         if root then pcall(function() ev:FireServer(root) end) end
         if hd then pcall(function() ev:FireServer(hd) end) end
     end
-    print("[PE CUFF] CuffEvent -> " .. plr.Name .. " (4 варианта аргументов)")
+    print("[PE CUFF] CuffEvent -> " .. plr.Name .. " (4 argument variants)")
 end
 
 -- ПРОКАЧКА ПУШКИ: Setting-модуль общий с GunScript_Local (require-кеш),
@@ -1869,12 +1869,12 @@ G.PE.ModGun = function(dmg)
     local chr = LP.Character
     local tool = chr and chr:FindFirstChildOfClass("Tool")
     if not tool or not tool:FindFirstChild("Setting") then
-        print("[PE MOD] возьми пушку в РУКИ (Setting не найден)")
+        print("[PE MOD] take a gun in HANDS (Setting not found)")
         return
     end
     local ok, S = pcall(function() return require(tool.Setting) end)
     if not ok or type(S) ~= "table" then
-        print("[PE MOD] Setting не читается: " .. tostring(S))
+        print("[PE MOD] Setting unreadable: " .. tostring(S))
         return
     end
     S.BaseDamage = dmg
@@ -1889,15 +1889,15 @@ G.PE.ModGun = function(dmg)
     S.DelayBeforeFiring = 0
     S.DelayAfterFiring = 0
     S.CameraShakingEnabled = false
-    print("[PE MOD] " .. tool.Name .. " прокачана: урон " .. dmg
-        .. ", авто, без разброса, перезарядка 0.5с")
+    print("[PE MOD] " .. tool.Name .. " upgraded: damage " .. dmg
+        .. ", auto, no spread, reload 0.5s")
 end
 
 -- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
 -- с какими аргументами игра честно стреляет InflictTarget.
 G.PE.GunSource = function()
     if type(decompile) ~= "function" then
-        print("[PE SRC] в этом исполнителе нет функции decompile")
+        print("[PE SRC] no decompile function in this executor")
         return
     end
     local any = false
@@ -1910,36 +1910,36 @@ G.PE.GunSource = function()
                 if ok and type(src) == "string" and #src > 0 then
                     any = true
                     local head = "[PE SRC] ===== " .. t.Name .. "." .. scrName
-                        .. " (" .. #src .. " байт) ====="
+                        .. " (" .. #src .. " bytes) ====="
                     print(head)
                     allTxt[#allTxt + 1] = head .. "\n" .. src
                 else
                     print("[PE SRC] " .. t.Name .. "." .. scrName
-                        .. ": decompile не удался: " .. tostring(src))
+                        .. ": decompile failed: " .. tostring(src))
                 end
             end
         end
     end
     if not any then
-        print("[PE SRC] пушек в руках/рюкзаке нет — возьми оружие")
+        print("[PE SRC] no guns in hands/backpack - take a weapon")
         return
     end
     if type(writefile) == "function" then
         pcall(writefile, "pe_gunsrc.txt", table.concat(allTxt, "\n\n"))
-        print("[PE SRC] полностью сохранено в pe_gunsrc.txt")
+        print("[PE SRC] fully saved to pe_gunsrc.txt")
     end
 end
 
 local function targetAllowed(p, mode, myTeam)
-    if mode == "Кроме своей команды" then
+    if mode == "Except my team" then
         return not (myTeam and p.Team == myTeam)
-    elseif mode == "Только своя команда" then
+    elseif mode == "Only my team" then
         return myTeam ~= nil and p.Team == myTeam
-    elseif mode == "Только охрана" then
+    elseif mode == "Only guards" then
         return (roleOf(p) == "guard")
-    elseif mode == "Только заключённые" then
+    elseif mode == "Only prisoners" then
         return (roleOf(p) == "prisoner")
-    elseif mode == "Враги (охрана↔зеки)" then
+    elseif mode == "Enemies (guards vs prisoners)" then
         -- За охрану бьём не-охрану, не за охрану — бьём охрану.
         local myRole = roleOf(LP)
         if myRole == "guard" then
@@ -1976,7 +1976,7 @@ local function auraTick()
                     if p ~= LP then
                         local ch4 = p.Character
                         local r4 = ch4 and ch4:FindFirstChild("HumanoidRootPart")
-                        if r4 and targetAllowed(p, CFG.CuffTeam or "Все", LP.Team) then
+                        if r4 and targetAllowed(p, CFG.CuffTeam or "Everyone", LP.Team) then
                             local d = (r4.Position - rootC.Position).Magnitude
                             if not bestD or d < bestD then
                                 bestP, bestD = p, d
@@ -2066,7 +2066,7 @@ local function auraTick()
                         local h3 = ch3 and ch3:FindFirstChildOfClass("Humanoid")
                         local r3 = ch3 and ch3:FindFirstChild("HumanoidRootPart")
                         if ch3 and h3 and h3.Health > 0 and r3
-                           and targetAllowed(p, CFG.PunchTeam or "Все", LP.Team) then
+                           and targetAllowed(p, CFG.PunchTeam or "Everyone", LP.Team) then
                             local d = (r3.Position - rootP.Position).Magnitude
                             if not bestD or d < bestD then
                                 bestR, bestD = r3, d
@@ -2188,12 +2188,12 @@ local function auraTick()
         -- Не молчим: «аура иногда не работает» = нет пушки.
         if os.clock() - (CFG._noGunWarnAt or 0) > 10 then
             CFG._noGunWarnAt = os.clock()
-            warn("[PE] килл-аура: нет пушки с InflictTarget — возьми оружие")
+            warn("[PE] kill aura: no gun with InflictTarget - take a weapon")
         end
         return
     end
     local radius = tonumber(CFG.KillAuraRadius) or 40
-    local mode = CFG.KillAuraTeam or "Все"
+    local mode = CFG.KillAuraTeam or "Everyone"
     local myTeam = LP.Team
     local hits = 0
     for _, p in ipairs(Players:GetPlayers()) do
@@ -2204,12 +2204,12 @@ local function auraTick()
             if ch and hum and hum.Health > 0 and root then
                 -- «Выбранный игрок»: бьём только цель из списка,
                 -- без ограничения дистанции.
-                local isSel = (mode == "Выбранный игрок"
+                local isSel = (mode == "Selected player"
                     and p.Name == CFG._target)
                 local inRange = (root.Position - myRoot.Position).Magnitude
                     <= radius
                 local ok = isSel
-                    or (mode ~= "Выбранный игрок" and inRange
+                    or (mode ~= "Selected player" and inRange
                         and targetAllowed(p, mode, myTeam))
                 if ok then
                     hits = hits + 1
@@ -2234,7 +2234,7 @@ auraConn = RunService.Heartbeat:Connect(function()
     local okA, errA = pcall(auraTick)
     if not okA and os.clock() - (CFG._auraErrAt or 0) > 5 then
         CFG._auraErrAt = os.clock()
-        warn("[PE] цикл аур: " .. tostring(errA))
+        warn("[PE] aura loop: " .. tostring(errA))
     end
 end)
 
@@ -2257,17 +2257,17 @@ local rfMovedN = 0     -- сколько ScreenGui перенесено в Playe
 -- Rayfield пропускается сразу, включается простое меню (если сам
 -- Rayfield грузится, но кнопки в нём мёртвые).
 if G.PE_SIMPLE == true then
-    warn("[PE] PE_SIMPLE=true — Rayfield пропущен, будет простое меню")
+    warn("[PE] PE_SIMPLE=true - Rayfield skipped")
 end
 if G.PE_SIMPLE ~= true then
 for _, u in ipairs(RF_URLS) do
     local ok, res = pcall(function()
         local src = game:HttpGet(u, true)
-        if type(src) ~= "string" or #src < 200 then error("пустой ответ") end
+        if type(src) ~= "string" or #src < 200 then error("empty response") end
         local f = loadstring(src, "Rayfield")
-        if type(f) ~= "function" then error("loadstring вернул nil") end
+        if type(f) ~= "function" then error("loadstring returned nil") end
         local lib = f()
-        if type(lib) ~= "table" then error("не таблица: " .. typeof(lib)) end
+        if type(lib) ~= "table" then error("not a table: " .. typeof(lib)) end
         return lib
     end)
     if ok and type(res) == "table" then
@@ -2275,7 +2275,7 @@ for _, u in ipairs(RF_URLS) do
         rfSource = u
         break
     end
-    warn("[PE] Rayfield не загрузился (" .. u .. "): " .. tostring(res))
+    warn("[PE] Rayfield failed to load (" .. u .. "): " .. tostring(res))
 end
 end -- PE_SIMPLE check
 
@@ -2306,7 +2306,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Бой v2.11",
+        LoadingSubtitle = "ESP + Combat v2.12",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2345,81 +2345,81 @@ local okGUI, errGUI = pcall(function()
     end
 
     local T = safeNewTab(W, "ESP", "box", "ESP")
-    if not T then error("вкладка ESP не создалась") end
+    if not T then error("ESP tab failed") end
 
-    T:CreateSection("Роли")
-    T:CreateParagraph({ Title = "Роли",
-        Content = "Охрана — синий, зеки — оранжевый, преступники — красный, прочие — серый. Роль определяется по команде, атрибутам и инструментам." })
-    T:CreateToggle({ Name = "ESP охраны", Flag = "PE_GuardESP",
+    T:CreateSection("Roles")
+    T:CreateParagraph({ Title = "Roles",
+        Content = "Guards are blue, prisoners orange, criminals red, others gray. Role is detected from team, attributes and tools." })
+    T:CreateToggle({ Name = "ESP guards", Flag = "PE_GuardESP",
         CurrentValue = CFG.GuardESP ~= false,
         Callback = function(v) CFG.GuardESP = v end })
-    T:CreateColorPicker({ Name = "Цвет охраны", Flag = "PE_ColGuard",
+    T:CreateColorPicker({ Name = "Guard color", Flag = "PE_ColGuard",
         Color = CFG.ColGuard, Callback = function(c) CFG.ColGuard = c end })
-    T:CreateToggle({ Name = "ESP зеков", Flag = "PE_PrisonerESP",
+    T:CreateToggle({ Name = "ESP prisoners", Flag = "PE_PrisonerESP",
         CurrentValue = CFG.PrisonerESP ~= false,
         Callback = function(v) CFG.PrisonerESP = v end })
-    T:CreateColorPicker({ Name = "Цвет зеков", Flag = "PE_ColPris",
+    T:CreateColorPicker({ Name = "Prisoner color", Flag = "PE_ColPris",
         Color = CFG.ColPris, Callback = function(c) CFG.ColPris = c end })
-    T:CreateToggle({ Name = "ESP преступников", Flag = "PE_CriminalESP",
+    T:CreateToggle({ Name = "ESP criminals", Flag = "PE_CriminalESP",
         CurrentValue = CFG.CriminalESP ~= false,
         Callback = function(v) CFG.CriminalESP = v end })
-    T:CreateColorPicker({ Name = "Цвет преступников", Flag = "PE_ColCrim",
+    T:CreateColorPicker({ Name = "Criminal color", Flag = "PE_ColCrim",
         Color = CFG.ColCrim, Callback = function(c) CFG.ColCrim = c end })
-    T:CreateToggle({ Name = "ESP прочих", Flag = "PE_PlayerESP",
+    T:CreateToggle({ Name = "ESP others", Flag = "PE_PlayerESP",
         CurrentValue = CFG.PlayerESP ~= false,
         Callback = function(v) CFG.PlayerESP = v end })
-    T:CreateColorPicker({ Name = "Цвет прочих", Flag = "PE_ColOther",
+    T:CreateColorPicker({ Name = "Others color", Flag = "PE_ColOther",
         Color = CFG.ColOther, Callback = function(c) CFG.ColOther = c end })
-    T:CreateSlider({ Name = "Дальность ESP (0 = вся карта)", Flag = "PE_MaxDist",
+    T:CreateSlider({ Name = "ESP range (0 = whole map)", Flag = "PE_MaxDist",
         Range = {0, 2000}, Increment = 50, CurrentValue = tonumber(CFG.MaxDist) or 900,
         Suffix = " st", Callback = function(v) CFG.MaxDist = v end })
 
-    T:CreateSection("Подписи")
-    T:CreateToggle({ Name = "Метки ролей [ОХР]/[ЗЕК]/[КРИМ]", Flag = "PE_RoleTags",
+    T:CreateSection("Labels")
+    T:CreateToggle({ Name = "Role tags [GUARD]/[PRIS]/[CRIM]", Flag = "PE_RoleTags",
         CurrentValue = CFG.RoleTags ~= false,
         Callback = function(v) CFG.RoleTags = v end })
-    T:CreateToggle({ Name = "Ники", Flag = "PE_Names",
+    T:CreateToggle({ Name = "Names", Flag = "PE_Names",
         CurrentValue = CFG.Names ~= false,
         Callback = function(v) CFG.Names = v end })
-    T:CreateToggle({ Name = "Оружие в руках", Flag = "PE_Weapon",
+    T:CreateToggle({ Name = "Weapon in hands", Flag = "PE_Weapon",
         CurrentValue = CFG.WeaponESP ~= false,
         Callback = function(v) CFG.WeaponESP = v end })
-    T:CreateToggle({ Name = "Дистанция", Flag = "PE_Dist",
+    T:CreateToggle({ Name = "Distance", Flag = "PE_Dist",
         CurrentValue = CFG.ShowDist ~= false,
         Callback = function(v) CFG.ShowDist = v end })
     T:CreateToggle({ Name = "HP", Flag = "PE_HP",
         CurrentValue = CFG.ShowHP ~= false,
         Callback = function(v) CFG.ShowHP = v end })
-    T:CreateToggle({ Name = "HP в процентах", Flag = "PE_HPPercent",
+    T:CreateToggle({ Name = "HP in percent", Flag = "PE_HPPercent",
         CurrentValue = CFG.HPPercent == true,
         Callback = function(v) CFG.HPPercent = v end })
-    T:CreateToggle({ Name = "Скорость цели", Flag = "PE_Speed",
+    T:CreateToggle({ Name = "Target speed", Flag = "PE_Speed",
         CurrentValue = CFG.ShowSpeed == true,
         Callback = function(v) CFG.ShowSpeed = v end })
-    T:CreateToggle({ Name = "Цвет ника по HP", Flag = "PE_NameHPColor",
+    T:CreateToggle({ Name = "Name color by HP", Flag = "PE_NameHPColor",
         CurrentValue = CFG.NameHPColor == true,
         Callback = function(v) CFG.NameHPColor = v end })
-    T:CreateToggle({ Name = "Прятать мёртвых", Flag = "PE_HideDead",
+    T:CreateToggle({ Name = "Hide dead", Flag = "PE_HideDead",
         CurrentValue = CFG.HideDead ~= false,
         Callback = function(v) CFG.HideDead = v end })
-    T:CreateSlider({ Name = "Размер текста ESP", Flag = "PE_LabelSize",
+    T:CreateSlider({ Name = "ESP text size", Flag = "PE_LabelSize",
         Range = {9, 24}, Increment = 1, CurrentValue = CFG.LabelSize or 13,
         Suffix = " px", Callback = function(v) CFG.LabelSize = v end })
 
-    T:CreateSection("Коробки")
-    T:CreateParagraph({ Title = "Коробки",
-        Content = "3D-коробка строится по габаритам всей модели: облегает тело целиком и поворачивается вместе с игроком. Есть рамка и уголки." })
-    T:CreateToggle({ Name = "Коробки игроков", Flag = "PE_Boxes2",
+    T:CreateSection("Boxes")
+    T:CreateParagraph({ Title = "Boxes",
+        Content = "3D box is built from the whole model bounds: hugs the body and rotates with the player. Frame and corners styles available." })
+    T:CreateToggle({ Name = "Player boxes", Flag = "PE_Boxes2",
         CurrentValue = DRAW_OK and CFG.Boxes ~= false,
         Callback = function(v)
             CFG.Boxes = v
             if v and not DRAW_OK then
                 CFG.Boxes = false
-                warn("[PE] в этом исполнителе нет Drawing — коробки выключены")
+                warn("[PE] no Drawing in this executor - boxes disabled")
             end
         end })
     T:CreateDropdown({
-        Name = "Стиль коробки",
+        Name = "Box style",
         Flag = "PE_BoxStylePick",
         Options = BOX_STYLES,
         CurrentOption = { CFG.BoxStyle },
@@ -2430,67 +2430,67 @@ local okGUI, errGUI = pcall(function()
             if type(picked) == "string" then CFG.BoxStyle = picked end
         end,
     })
-    T:CreateSlider({ Name = "Толщина коробки", Flag = "PE_BoxThick",
+    T:CreateSlider({ Name = "Box thickness", Flag = "PE_BoxThick",
         Range = {1, 6}, Increment = 1, CurrentValue = CFG.BoxThick or 2,
         Callback = function(v) CFG.BoxThick = v end })
-    T:CreateSlider({ Name = "Отступ коробки (экран)", Flag = "PE_BoxPad",
+    T:CreateSlider({ Name = "Box padding (screen)", Flag = "PE_BoxPad",
         Range = {0, 40}, Increment = 1, CurrentValue = CFG.BoxPad or 4,
         Suffix = " px", Callback = function(v) CFG.BoxPad = v end })
-    T:CreateSlider({ Name = "Отступ 3D-коробки (студов)", Flag = "PE_BoxMargin",
+    T:CreateSlider({ Name = "3D box margin (studs)", Flag = "PE_BoxMargin",
         Range = {0, 10}, Increment = 0.1,
         CurrentValue = math.floor((tonumber(CFG.BoxMargin) or 0) * 10 + 0.5) / 10,
         Suffix = " st", Callback = function(v) CFG.BoxMargin = v end })
-    T:CreateSlider({ Name = "Прозрачность коробки", Flag = "PE_BoxAlpha",
+    T:CreateSlider({ Name = "Box transparency", Flag = "PE_BoxAlpha",
         Range = {0, 90}, Increment = 5,
         CurrentValue = math.floor((tonumber(CFG.BoxAlpha) or 0) * 100 + 0.5),
         Suffix = " %", Callback = function(v) CFG.BoxAlpha = v / 100 end })
-    T:CreateToggle({ Name = "Затухание коробок по дистанции", Flag = "PE_DistFade",
+    T:CreateToggle({ Name = "Box fade by distance", Flag = "PE_DistFade",
         CurrentValue = CFG.DistFade == true,
         Callback = function(v) CFG.DistFade = v end })
 
-    T:CreateSection("Визуалы игроков")
-    T:CreateToggle({ Name = "Скелет ESP", Flag = "PE_Skeleton",
+    T:CreateSection("Player visuals")
+    T:CreateToggle({ Name = "Skeleton ESP", Flag = "PE_Skeleton",
         CurrentValue = CFG.Skeleton == true,
         Callback = function(v) CFG.Skeleton = v end })
-    T:CreateSlider({ Name = "Толщина скелета", Flag = "PE_SkeletonThick",
+    T:CreateSlider({ Name = "Skeleton thickness", Flag = "PE_SkeletonThick",
         Range = {1, 4}, Increment = 1, CurrentValue = CFG.SkeletonThick or 1,
         Callback = function(v) CFG.SkeletonThick = v end })
-    T:CreateSlider({ Name = "Скелет: ближе не показывать", Flag = "PE_SkelMinDist",
+    T:CreateSlider({ Name = "Skeleton: hide closer than", Flag = "PE_SkelMinDist",
         Range = {0, 60}, Increment = 2, CurrentValue = CFG.SkelMinDist or 12,
         Suffix = " st", Callback = function(v) CFG.SkelMinDist = v end })
-    T:CreateToggle({ Name = "Полоска HP над головой", Flag = "PE_HealthBars",
+    T:CreateToggle({ Name = "HP bar above head", Flag = "PE_HealthBars",
         CurrentValue = CFG.HealthBars ~= false,
         Callback = function(v) CFG.HealthBars = v end })
-    T:CreateSlider({ Name = "Ширина полоски HP", Flag = "PE_HealthBarWidth",
+    T:CreateSlider({ Name = "HP bar width", Flag = "PE_HealthBarWidth",
         Range = {20, 80}, Increment = 2, CurrentValue = CFG.HealthBarWidth or 40,
         Suffix = " px", Callback = function(v) CFG.HealthBarWidth = v end })
-    T:CreateSlider({ Name = "Высота полоски HP", Flag = "PE_HealthBarHeight",
+    T:CreateSlider({ Name = "HP bar height", Flag = "PE_HealthBarHeight",
         Range = {2, 10}, Increment = 1, CurrentValue = CFG.HealthBarHeight or 4,
         Suffix = " px", Callback = function(v) CFG.HealthBarHeight = v end })
-    T:CreateToggle({ Name = "Цифры HP на полоске", Flag = "PE_HPBarText",
+    T:CreateToggle({ Name = "HP numbers on bar", Flag = "PE_HPBarText",
         CurrentValue = CFG.HPBarText ~= false,
         Callback = function(v) CFG.HPBarText = v end })
-    T:CreateToggle({ Name = "Градиент полоски HP", Flag = "PE_HPGradient",
+    T:CreateToggle({ Name = "HP bar gradient", Flag = "PE_HPGradient",
         CurrentValue = CFG.HPGradient ~= false,
         Callback = function(v) CFG.HPGradient = v end })
-    T:CreateToggle({ Name = "Рамка вокруг головы", Flag = "PE_HeadBox",
+    T:CreateToggle({ Name = "Head frame", Flag = "PE_HeadBox",
         CurrentValue = CFG.HeadBox ~= false,
         Callback = function(v) CFG.HeadBox = v end })
-    T:CreateSlider({ Name = "Размер рамки головы", Flag = "PE_HeadBoxSize",
+    T:CreateSlider({ Name = "Head frame size", Flag = "PE_HeadBoxSize",
         Range = {10, 50}, Increment = 1, CurrentValue = CFG.HeadBoxSize or 22,
         Suffix = " px", Callback = function(v) CFG.HeadBoxSize = v end })
-    T:CreateToggle({ Name = "Рамка головы по цвету роли", Flag = "PE_HeadBoxRole",
+    T:CreateToggle({ Name = "Head frame in role color", Flag = "PE_HeadBoxRole",
         CurrentValue = CFG.HeadBoxRole ~= false,
         Callback = function(v) CFG.HeadBoxRole = v end })
-    T:CreateToggle({ Name = "Стрелки к игрокам (snaplines)", Flag = "PE_Snaplines",
+    T:CreateToggle({ Name = "Snaplines to players", Flag = "PE_Snaplines",
         CurrentValue = CFG.Snaplines ~= false,
         Callback = function(v) CFG.Snaplines = v end })
-    T:CreateSlider({ Name = "Толщина стрелок", Flag = "PE_SnapArrowThick",
+    T:CreateSlider({ Name = "Arrow thickness", Flag = "PE_SnapArrowThick",
         Range = {1, 6}, Increment = 1,
         CurrentValue = math.clamp(tonumber(CFG.SnapArrowThick) or 2, 1, 6),
         Suffix = " px", Callback = function(v) CFG.SnapArrowThick = v end })
     T:CreateDropdown({
-        Name = "Стрелки от: откуда",
+        Name = "Snapline origin",
         Flag = "PE_SnapFromPick",
         Options = TRACER_ORIGINS,
         CurrentOption = { CFG.SnapFrom },
@@ -2501,65 +2501,65 @@ local okGUI, errGUI = pcall(function()
             if type(picked) == "string" then CFG.SnapFrom = picked end
         end,
     })
-    T:CreateSlider({ Name = "Прозрачность стрелок", Flag = "PE_SnapAlpha",
+    T:CreateSlider({ Name = "Arrow transparency", Flag = "PE_SnapAlpha",
         Range = {0, 10}, Increment = 1,
         CurrentValue = math.floor((tonumber(CFG.SnapAlpha) or 1) * 10 + 0.5),
         Suffix = " /10", Callback = function(v) CFG.SnapAlpha = v / 10 end })
-    T:CreateToggle({ Name = "Стрелки к целям за экраном", Flag = "PE_OffArrows",
+    T:CreateToggle({ Name = "Off-screen arrows", Flag = "PE_OffArrows",
         CurrentValue = CFG.OffArrows ~= false,
         Callback = function(v) CFG.OffArrows = v end })
-    T:CreateToggle({ Name = "Кольцо под целью", Flag = "PE_GroundRing",
+    T:CreateToggle({ Name = "Ring under target", Flag = "PE_GroundRing",
         CurrentValue = CFG.GroundRing ~= false,
         Callback = function(v) CFG.GroundRing = v end })
-    T:CreateToggle({ Name = "Вектор движения цели", Flag = "PE_MoveVec",
+    T:CreateToggle({ Name = "Movement vector", Flag = "PE_MoveVec",
         CurrentValue = CFG.MoveVec == true,
         Callback = function(v) CFG.MoveVec = v end })
-    T:CreateToggle({ Name = "Лёгкий режим ESP (меньше нагрузки)", Flag = "PE_LiteESP",
+    T:CreateToggle({ Name = "Lite ESP mode (less load)", Flag = "PE_LiteESP",
         CurrentValue = CFG.LiteESP == true,
         Callback = function(v) CFG.LiteESP = v end })
 
-    T:CreateSection("Миникарта")
-    T:CreateToggle({ Name = "Миникарта", Flag = "PE_Minimap",
+    T:CreateSection("Minimap")
+    T:CreateToggle({ Name = "Minimap", Flag = "PE_Minimap",
         CurrentValue = CFG.Minimap == true,
         Callback = function(v) CFG.Minimap = v end })
-    T:CreateSlider({ Name = "Размер миникарты", Flag = "PE_MinimapSize",
+    T:CreateSlider({ Name = "Minimap size", Flag = "PE_MinimapSize",
         Range = {100, 300}, Increment = 10, CurrentValue = CFG.MinimapSize or 160,
         Suffix = " px", Callback = function(v) CFG.MinimapSize = v end })
-    T:CreateToggle({ Name = "Точка себя на миникарте", Flag = "PE_MinimapSelf",
+    T:CreateToggle({ Name = "Self dot on minimap", Flag = "PE_MinimapSelf",
         CurrentValue = CFG.MinimapSelf ~= false,
         Callback = function(v) CFG.MinimapSelf = v end })
 
-    local M = safeNewTab(W, "Мир", "magnet", "Мир")
-    if not M then error("вкладка Мир не создалась") end
-    M:CreateSection("Предметы на земле")
-    M:CreateParagraph({ Title = "Предметы",
-        Content = "Подсветка пушек, кейкарты, ящиков с патронами и молотка на земле (через стены)." })
-    M:CreateToggle({ Name = "Пушки/ключи/патроны на земле", Flag = "PE_Items",
+    local M = safeNewTab(W, "World", "magnet", "World")
+    if not M then error("World tab failed") end
+    M:CreateSection("Ground items")
+    M:CreateParagraph({ Title = "Items",
+        Content = "Highlights guns, keycards, ammo boxes and the hammer on the ground (through walls)." })
+    M:CreateToggle({ Name = "Guns/keycards/ammo on ground", Flag = "PE_Items",
         CurrentValue = CFG.Items ~= false,
         Callback = function(v) CFG.Items = v end })
 
-    local R = safeNewTab(W, "Разведка", "search", "Разведка")
-    if not R then error("вкладка Разведка не создалась") end
-    R:CreateSection("Разведка")
-    R:CreateParagraph({ Title = "Как проверять дыры",
-        Content = "1) PE.Remotes() в консоль — все ремоуты. 2) PE.Guns() — ТТХ пушек. 3) PE.Probe(\"InflictTarget\", workspace[\"НИК\"].Humanoid) — урон по чужой части. PE.Probe(\"ChangeAmmoAndClip\", 30, 30) — патроны. PE.Probe(\"ChooseTeamEvent\", \"Guard\") — смена команды. PE.TeamOf(игрок) — как скрипт видит роль." })
-    R:CreateButton({ Name = "ТТХ пушек (в консоль)", Callback = function()
+    local R = safeNewTab(W, "Recon", "search", "Recon")
+    if not R then error("Recon tab failed") end
+    R:CreateSection("Recon")
+    R:CreateParagraph({ Title = "How to probe",
+        Content = "1) PE.Remotes() to console - all remotes. 2) PE.Guns() - gun stats. 3) PE.Probe(\"InflictTarget\", workspace[\"NICK\"].Humanoid) - damage. PE.Probe(\"ChooseTeamEvent\", \"Guard\") - team switch. PE.TeamOf(player) - how the script sees the role." })
+    R:CreateButton({ Name = "Gun stats (console)", Callback = function()
         G.PE.Guns()
     end })
-    R:CreateButton({ Name = "Список ремоутов (в консоль)", Callback = function()
+    R:CreateButton({ Name = "Remotes list (console)", Callback = function()
         G.PE.Remotes()
     end })
-    R:CreateSection("Пробы в один клик")
-    R:CreateParagraph({ Title = "Пробы",
-        Content = "Введи ЧАСТЬ ника врага и жми кнопки. Смотри на HP/патроны/команду цели после нажатия. Проба урона требует пушку в руках или рюкзаке." })
+    R:CreateSection("One-click probes")
+    R:CreateParagraph({ Title = "Probes",
+        Content = "Pick a target from the list and press the buttons. Watch the target HP/team after pressing. Damage probe requires a gun in hands/backpack." })
     local opts0 = {}
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP then opts0[#opts0 + 1] = p.Name end
     end
     table.sort(opts0)
-    if #opts0 == 0 then opts0[1] = "(игроков нет)" end
+    if #opts0 == 0 then opts0[1] = "(no players)" end
     local hitDrop = R:CreateDropdown({
-        Name = "Цель (выбери игрока из списка)",
+        Name = "Target (pick a player)",
         Flag = "PE_TargetPick1",
         Options = opts0,
         CurrentOption = {},
@@ -2571,42 +2571,42 @@ local okGUI, errGUI = pcall(function()
         end,
     })
     targetPickers[#targetPickers + 1] = hitDrop
-    R:CreateButton({ Name = "ПРОБА: урон по игроку (InflictTarget)",
+    R:CreateButton({ Name = "PROBE: damage player (InflictTarget)",
         Callback = function() G.PE.Hit(CFG._target) end })
-    R:CreateButton({ Name = "ПРОБА: смена команды Guard",
+    R:CreateButton({ Name = "PROBE: switch team Guard",
         Callback = function() G.PE.Team("Guard") end })
-    R:CreateButton({ Name = "ПРОБА: смена команды Prisoner",
+    R:CreateButton({ Name = "PROBE: switch team Prisoner",
         Callback = function() G.PE.Team("Prisoner") end })
 
     -- ====================== ВКЛАДКА БОЙ ======================
-    local C = safeNewTab(W, "Бой", "swords", "Бой")
-    if not C then error("вкладка Бой не создалась") end
+    local C = safeNewTab(W, "Combat", "swords", "Combat")
+    if not C then error("Combat tab failed") end
 
-    C:CreateSection("Килл-аура (InflictTarget)")
-    C:CreateParagraph({ Title = "Килл-аура",
-        Content = "Бьёт точно так, как стреляет сама пушка: InflictTarget(Humanoid, RootPart, урон, направление, отдача, вампиризм, поджог) — подписура из декомпиляции GunScript_Local. Нужна пушка в руках или рюкзаке." })
-    C:CreateToggle({ Name = "Килл-аура", Flag = "PE_KillAura",
+    C:CreateSection("Kill aura (InflictTarget)")
+    C:CreateParagraph({ Title = "Kill aura",
+        Content = "Hits exactly like the gun itself: InflictTarget(Humanoid, RootPart, damage, direction, knockback, lifesteal, flame) - signature from the decompiled GunScript_Local. Needs a gun in hands/backpack." })
+    C:CreateToggle({ Name = "Kill aura", Flag = "PE_KillAura",
         CurrentValue = CFG.KillAura == true,
         Callback = function(v) CFG.KillAura = v end })
-    C:CreateSlider({ Name = "Радиус ауры", Flag = "PE_KillAuraRadius",
+    C:CreateSlider({ Name = "Aura radius", Flag = "PE_KillAuraRadius",
         Range = {10, 120}, Increment = 5,
         CurrentValue = tonumber(CFG.KillAuraRadius) or 40,
         Suffix = " st", Callback = function(v) CFG.KillAuraRadius = v end })
-    C:CreateSlider({ Name = "Урон за выстрел", Flag = "PE_KillAuraDamage",
+    C:CreateSlider({ Name = "Damage per shot", Flag = "PE_KillAuraDamage",
         Range = {1, 10000}, Increment = 10,
         CurrentValue = math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 10000),
         Callback = function(v) CFG.KillAuraDamage = v end })
-    C:CreateSlider({ Name = "Задержка между тиками", Flag = "PE_KillAuraDelay",
+    C:CreateSlider({ Name = "Tick delay", Flag = "PE_KillAuraDelay",
         Range = {10, 100}, Increment = 5,
         CurrentValue = math.clamp(
             math.floor((tonumber(CFG.KillAuraDelay) or 0.15) * 100 + 0.5), 10, 100),
-        Suffix = " x10мс", Callback = function(v) CFG.KillAuraDelay = v / 100 end })
+        Suffix = " x10ms", Callback = function(v) CFG.KillAuraDelay = v / 100 end })
     C:CreateDropdown({
-        Name = "Кого бить",
+        Name = "Who to hit",
         Flag = "PE_KillAuraTeamPick",
-        Options = { "Все", "Кроме своей команды", "Только своя команда",
-            "Враги (охрана↔зеки)", "Только охрана", "Только заключённые",
-            "Выбранный игрок" },
+        Options = { "Everyone", "Except my team", "Only my team",
+            "Enemies (guards vs prisoners)", "Only guards", "Only prisoners",
+            "Selected player" },
         CurrentOption = { CFG.KillAuraTeam },
         MultipleOptions = false,
         Callback = function(selected)
@@ -2616,17 +2616,17 @@ local okGUI, errGUI = pcall(function()
         end,
     })
 
-    C:CreateSection("Наручники и телепорт")
-    C:CreateParagraph({ Title = "Наручники и телепорт",
-        Content = "Комбо «того чела»: телепорт за спину жертве + мгновенные наручники через CuffEvent. Наручники (Handcuffs) есть только у GUARD — сначала нажми «Команда: GUARD», заспавнься, потом используй кнопки." })
+    C:CreateSection("Cuffs & teleport")
+    C:CreateParagraph({ Title = "Cuffs & teleport",
+        Content = "The combo: teleport behind the victim + instant cuffs via CuffEvent. Handcuffs exist only for GUARD - press 'Team: GUARD' first, respawn, then use the buttons." })
     local opts1 = {}
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP then opts1[#opts1 + 1] = p.Name end
     end
     table.sort(opts1)
-    if #opts1 == 0 then opts1[1] = "(игроков нет)" end
+    if #opts1 == 0 then opts1[1] = "(no players)" end
     local cuffDrop = C:CreateDropdown({
-        Name = "Жертва (выбери игрока из списка)",
+        Name = "Victim (pick a player)",
         Flag = "PE_TargetPick2",
         Options = opts1,
         CurrentOption = {},
@@ -2638,24 +2638,24 @@ local okGUI, errGUI = pcall(function()
         end,
     })
     targetPickers[#targetPickers + 1] = cuffDrop
-    C:CreateButton({ Name = "ТЕЛЕПОРТ к игроку (за спину)",
+    C:CreateButton({ Name = "TELEPORT to player (behind)",
         Callback = function() G.PE.TP(CFG._target) end })
-    C:CreateButton({ Name = "НАРУЧНИКИ на игрока",
+    C:CreateButton({ Name = "CUFF player",
         Callback = function() G.PE.Cuff(CFG._target) end })
-    C:CreateButton({ Name = "ТЕЛЕПОРТ + НАРУЧНИКИ (комбо)",
+    C:CreateButton({ Name = "TELEPORT + CUFF (combo)",
         Callback = function()
             G.PE.TP(CFG._target)
             task.wait(0.15)
             G.PE.Cuff(CFG._target)
         end })
-    C:CreateToggle({ Name = "Cuff-аура (сковывать ближайшего врага)",
+    C:CreateToggle({ Name = "Cuff aura (nearest enemy)",
         Flag = "PE_CuffAura",
         CurrentValue = CFG.CuffAura == true,
         Callback = function(v) CFG.CuffAura = v end })
     C:CreateDropdown({
-        Name = "Кого сковывать аурой",
+        Name = "Who to cuff",
         Flag = "PE_CuffTeamPick",
-        Options = { "Все", "Кроме своей команды" },
+        Options = { "Everyone", "Except my team" },
         CurrentOption = { CFG.CuffTeam },
         MultipleOptions = false,
         Callback = function(selected)
@@ -2665,37 +2665,37 @@ local okGUI, errGUI = pcall(function()
         end,
     })
 
-    C:CreateSection("Прокачка пушки")
-    C:CreateParagraph({ Title = "Прокачка",
-        Content = "Меняет Setting-модуль пушки в руках (require-кеш общий с GunScript_Local): урон, авто-режим, нулевой разброс, мгновенная перезарядка. Выстрелы выглядят легитимно, а бьют как прокачанные. Действует до смены оружия/респавна — жми снова." })
-    C:CreateSlider({ Name = "Урон прокачки", Flag = "PE_ModGunDamage",
+    C:CreateSection("Gun upgrade")
+    C:CreateParagraph({ Title = "Upgrade",
+        Content = "Edits the Setting module of the gun in hands (require cache shared with GunScript_Local): damage, auto mode, zero spread, instant reload. Shots look legit but hit upgraded. Resets on weapon change/respawn - press again." })
+    C:CreateSlider({ Name = "Upgrade damage", Flag = "PE_ModGunDamage",
         Range = {10, 10000}, Increment = 10,
         CurrentValue = math.clamp(tonumber(CFG.ModGunDamage) or 250, 10, 10000),
         Callback = function(v) CFG.ModGunDamage = v end })
-    C:CreateButton({ Name = "ПРОКАЧАТЬ пушку в руках",
+    C:CreateButton({ Name = "UPGRADE gun in hands",
         Callback = function() G.PE.ModGun() end })
 
-    C:CreateSection("Кулаки (Punch-аура)")
-    C:CreateParagraph({ Title = "Punch-аура",
-        Content = "Сервер кулаков бьёт только ВПЛОТНУЮ. Режим «Стоять у цели» (вкл по умолчанию): телепорт к жертве ОДИН раз, остаёшься рядом и бьёшь без возвратов — попадания без промахов по таймингу. Цель умерла → телепорт к следующей. Выключил ауру → вернулся домой." })
-    C:CreateToggle({ Name = "Punch-аура", Flag = "PE_PunchAura",
+    C:CreateSection("Fists (Punch aura)")
+    C:CreateParagraph({ Title = "Punch aura",
+        Content = "The fist server only hits point blank. 'Stay at target' mode (on by default): teleport to the victim ONCE, stay close and punch with no round trips - no timing misses. Target died - teleport to the next one. Toggle off - you return home." })
+    C:CreateToggle({ Name = "Punch aura", Flag = "PE_PunchAura",
         CurrentValue = CFG.PunchAura == true,
         Callback = function(v) CFG.PunchAura = v end })
-    C:CreateSlider({ Name = "Задержка ударов", Flag = "PE_PunchDelay",
+    C:CreateSlider({ Name = "Punch delay", Flag = "PE_PunchDelay",
         Range = {10, 100}, Increment = 5,
         CurrentValue = math.clamp(
             math.floor((tonumber(CFG.PunchDelay) or 0.25) * 100 + 0.5), 10, 100),
-        Suffix = " x10мс", Callback = function(v) CFG.PunchDelay = v / 100 end })
-    C:CreateToggle({ Name = "Стоять у цели (макс. скорость)", Flag = "PE_PunchStay",
+        Suffix = " x10ms", Callback = function(v) CFG.PunchDelay = v / 100 end })
+    C:CreateToggle({ Name = "Stay at target (max speed)", Flag = "PE_PunchStay",
         CurrentValue = CFG.PunchStay ~= false,
         Callback = function(v) CFG.PunchStay = v end })
-    C:CreateToggle({ Name = "Бить дальних (подлёт+удар+возврат)", Flag = "PE_PunchTele",
+    C:CreateToggle({ Name = "Hit far (fly+hit+return)", Flag = "PE_PunchTele",
         CurrentValue = CFG.PunchTele ~= false,
         Callback = function(v) CFG.PunchTele = v end })
     C:CreateDropdown({
-        Name = "Кого бить кулаками",
+        Name = "Who to punch",
         Flag = "PE_PunchTeamPick",
-        Options = { "Все", "Кроме своей команды" },
+        Options = { "Everyone", "Except my team" },
         CurrentOption = { CFG.PunchTeam },
         MultipleOptions = false,
         Callback = function(selected)
@@ -2705,38 +2705,38 @@ local okGUI, errGUI = pcall(function()
         end,
     })
 
-    C:CreateSection("Команда и статус")
-    C:CreateButton({ Name = "Команда: GUARD (охрана)",
+    C:CreateSection("Team & status")
+    C:CreateButton({ Name = "Team: GUARD",
         Callback = function() G.PE.Team("Guard") end })
-    C:CreateButton({ Name = "Команда: PRISONER (зек)",
+    C:CreateButton({ Name = "Team: PRISONER",
         Callback = function() G.PE.Team("Prisoner") end })
-    C:CreateButton({ Name = "Команда: CRIMINAL",
+    C:CreateButton({ Name = "Team: CRIMINAL",
         Callback = function() G.PE.Team("Criminal") end })
-    C:CreateButton({ Name = "Сброс в меню (выход из наручников)",
+    C:CreateButton({ Name = "Reset to menu (escape cuffs)",
         Callback = function() G.PE.ResetMenu() end })
 
-    C:CreateSection("Движение")
-    C:CreateToggle({ Name = "Анти-стан (тазер/наручники/регдолл)", Flag = "PE_AntiStun",
+    C:CreateSection("Movement")
+    C:CreateToggle({ Name = "Anti-stun (taser/cuffs/ragdoll)", Flag = "PE_AntiStun",
         CurrentValue = CFG.AntiStun ~= false,
         Callback = function(v) CFG.AntiStun = v end })
 
-    C:CreateSection("Гивер оружия (клик-детекторы)")
-    C:CreateParagraph({ Title = "Гивер",
-        Content = "Выдаёт оружие/кейкарту через fireclickdetector по моделям на земле. Дистанция не проверяется. Если пушка НЕ выдаётся — её серверный скрипт, похоже, требует команду GUARD: сначала нажми «Команда: GUARD», потом выдай. Возьми оружие из рюкзака после выдачи." })
-    C:CreateButton({ Name = "ВЫДАТЬ ВСЁ (пушки + KeyCard)",
+    C:CreateSection("Weapon giver (click detectors)")
+    C:CreateParagraph({ Title = "Giver",
+        Content = "Gives weapons/keycard via fireclickdetector on ground models. Distance is not checked. If a gun is NOT given - its server script likely requires GUARD team: press 'Team: GUARD' first, then give. Take the weapon from your backpack afterwards." })
+    C:CreateButton({ Name = "GIVE ALL (guns + KeyCard)",
         Callback = function() G.PE.GiveAll() end })
     for _, nm in ipairs(GIVE_ITEMS) do
-        C:CreateButton({ Name = "Выдать: " .. nm,
+        C:CreateButton({ Name = "Give: " .. nm,
             Callback = function() G.PE.Give(nm) end })
     end
-    C:CreateButton({ Name = "Открыть ВСЕ двери (камеры тюрьмы)",
+    C:CreateButton({ Name = "Open ALL doors (jail cells)",
         Callback = function() G.PE.Doors() end })
-    C:CreateButton({ Name = "Исходники пушки -> консоль (decompile)",
+    C:CreateButton({ Name = "Gun source -> console (decompile)",
         Callback = function() G.PE.GunSource() end })
     guiOK = true
 end)
 if not okGUI then
-    warn("[PE] СБОРКА МЕНЮ RAYFIELD УПАЛА: " .. tostring(errGUI))
+    warn("[PE] RAYFIELD MENU BUILD FAILED: " .. tostring(errGUI))
     -- Ломаное полусобранное окно убираем, чтобы не висло вместе
     -- с простым меню (жалоба «два меню»).
     pcall(function()
@@ -2764,10 +2764,10 @@ local function rescueRayfield()
         if okM then
             rfMovedN = rfMovedN + 1
             print("[PE] Rayfield ScreenGui '" .. sg.Name
-                .. "' ПЕРЕНЕСЁН в PlayerGui — клики должны заработать")
+                .. "' MOVED to PlayerGui - clicks should work")
             return true
         end
-        warn("[PE] перенос '" .. sg.Name .. "' не удался: " .. tostring(errM))
+        warn("[PE] move '" .. sg.Name .. "' failed: " .. tostring(errM))
         return false
     end
     -- 1) Точное имя: Rayfield создаёт ScreenGui с именем "Rayfield"
@@ -2803,28 +2803,28 @@ task.delay(2.5, rescueRayfield)
 --  ДИАГНОСТИКА: PE.Diag() + логгер каждого клика.
 -- ============================================================
 G.PE.Diag = function()
-    print("========== [PE DIAG] НАЧАЛО ==========")
+    print("========== [PE DIAG] START ==========")
     do
         local okEx, ex = pcall(function()
             return identifyexecutor and identifyexecutor() or "?"
         end)
-        print("[PE DIAG] исполнитель: " .. (okEx and tostring(ex) or "?"))
+        print("[PE DIAG] executor: " .. (okEx and tostring(ex) or "?"))
     end
     print("[PE DIAG] Drawing=" .. tostring(DRAW_OK)
         .. " | Rayfield=" .. tostring(Rayfield ~= nil)
-        .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
-        .. " | ScreenGui перенесено в PlayerGui=" .. tostring(rfMovedN))
+        .. " | source=" .. tostring(rfSource or "NOT loaded")
+        .. " | ScreenGui moved to PlayerGui=" .. tostring(rfMovedN))
     do
         local hasGethui = typeof(gethui) == "function"
-        print("[PE DIAG] gethui: " .. (hasGethui and "есть" or "НЕТ"))
+        print("[PE DIAG] gethui: " .. (hasGethui and "yes" or "NO"))
         if hasGethui then
             local okH, h = pcall(gethui)
-            print("[PE DIAG] gethui() -> " .. (okH and tostring(h) or ("ошибка: " .. tostring(h))))
+            print("[PE DIAG] gethui() -> " .. (okH and tostring(h) or ("error: " .. tostring(h))))
         end
     end
     local function dumpCont(label, cont)
         if not cont then
-            print("[PE DIAG] " .. label .. ": контейнера нет")
+            print("[PE DIAG] " .. label .. ": no container")
             return
         end
         local n = 0
@@ -2832,13 +2832,13 @@ G.PE.Diag = function()
             for _, c in ipairs(cont:GetChildren()) do
                 if c:IsA("ScreenGui") then
                     n = n + 1
-                    print(("[PE DIAG] %s: ScreenGui '%s' | Order=%d | Enabled=%s | детей=%d"):format(
+                    print(("[PE DIAG] %s: ScreenGui '%s' | Order=%d | Enabled=%s | children=%d"):format(
                         label, c.Name, c.DisplayOrder, tostring(c.Enabled), #c:GetChildren()))
                 end
             end
         end)
         if n == 0 then
-            print("[PE DIAG] " .. label .. ": ScreenGui НЕТ")
+            print("[PE DIAG] " .. label .. ": NO ScreenGui")
         end
     end
     dumpCont("PlayerGui", LP:FindFirstChildOfClass("PlayerGui"))
@@ -2847,7 +2847,7 @@ G.PE.Diag = function()
         local okH, h = pcall(gethui)
         if okH and h then dumpCont("gethui", h) end
     end
-    print("========== [PE DIAG] КОНЕЦ ==========")
+    print("========== [PE DIAG] END ==========")
 end
 
 -- Логгер кликов: выключен по умолчанию (шумит). Включить ПЕРЕД
@@ -2882,17 +2882,17 @@ if G.PE_CLICKLOG == true then
                         end
                     end)
                 end
-                local tag = gp and "GUI" or "МИР"
+                local tag = gp and "GUI" or "WORLD"
                 if #found > 0 then
                     print("[PE CLICK " .. tag .. "] " .. x .. "," .. y
                         .. " -> " .. table.concat(found, " | "))
                 else
                     print("[PE CLICK " .. tag .. "] " .. x .. "," .. y
-                        .. " -> под курсором нет GUI (в PlayerGui)")
+                        .. " -> no GUI under cursor (in PlayerGui)")
                 end
             end
         end)
-        print("[PE] логгер кликов ВКЛ (выключить: getgenv().PE_CLICKLOG=false и перезапуск)")
+        print("[PE] click logger ON (disable: getgenv().PE_CLICKLOG=false + restart)")
     end)
 end
 
@@ -2904,9 +2904,9 @@ end)
 -- Простое меню УДАЛЕНО: только Rayfield. Если он не собрался —
 -- громко ругаемся в консоль (функции доступны и без меню).
 if not Rayfield then
-    warn("[PE] Rayfield НЕ загрузился — меню не будет. Управление через консоль: PE.Hit/PE.Team/PE.Give/PE.Doors и т.д.")
+    warn("[PE] Rayfield failed to load - no menu. Console: PE.Hit/PE.Team/PE.Give/PE.Doors etc.")
 elseif not guiOK then
-    warn("[PE] меню Rayfield не собралось (ошибка выше). Управление через консоль: PE.Hit/PE.Team/PE.Give/PE.Doors и т.д.")
+    warn("[PE] Rayfield menu failed to build (error above). Console: PE.Hit/PE.Team/PE.Give/PE.Doors etc.")
 end
 
 -- ============================================================
@@ -2984,14 +2984,14 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.11 остановлен")
+    print("[PE] v2.12 stopped")
 end
 
-print("[PE] v2.11 запущен | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.12 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
-    .. " | источник=" .. tostring(rfSource or "НЕ загрузился")
-    .. " | консоль: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
-    .. " / PE.Hit(\"часть ника\") / PE.Team(\"Guard\") / PE.Diag()")
+    .. " | source=" .. tostring(rfSource or "NOT loaded")
+    .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
+    .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
 if not DRAW_OK then
-    warn("[PE] Drawing недоступен в этом исполнителе: коробки/скелет/стрелки/полоски HP/миникарта НЕ будут рисоваться. Работают только подписи над игроками и подсветка предметов.")
+    warn("[PE] Drawing unavailable in this executor: boxes/skeleton/arrows/HP bars/minimap will NOT be drawn. Only player labels and item highlights work.")
 end
