@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.13
+--  PRISON ESP  v2.14
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -2188,7 +2188,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.13",
+        LoadingSubtitle = "ESP + Combat v2.14",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2419,49 +2419,6 @@ local okGUI, errGUI = pcall(function()
     M:CreateToggle({ Name = "Guns/keycards/ammo on ground", Flag = "PE_Items",
         CurrentValue = CFG.Items ~= false,
         Callback = function(v) CFG.Items = v end })
-
-    local R = safeNewTab(W, "Recon", "search", "Recon")
-    if not R then error("Recon tab failed") end
-    R:CreateSection("Recon")
-    R:CreateParagraph({ Title = "How to probe",
-        Content = "1) PE.Remotes() to console - all remotes. 2) PE.Guns() - gun stats. 3) PE.Probe(\"InflictTarget\", workspace[\"NICK\"].Humanoid) - damage. PE.Probe(\"ChooseTeamEvent\", \"Guard\") - team switch. PE.TeamOf(player) - how the script sees the role." })
-    R:CreateButton({ Name = "Gun stats (console)", Callback = function()
-        G.PE.Guns()
-    end })
-    R:CreateButton({ Name = "Remotes list (console)", Callback = function()
-        G.PE.Remotes()
-    end })
-    R:CreateSection("One-click probes")
-    R:CreateParagraph({ Title = "Probes",
-        Content = "Pick a target from the list and press the buttons. Watch the target HP/team after pressing. Damage probe requires a gun in hands/backpack." })
-    local opts0 = {}
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP then opts0[#opts0 + 1] = p.Name end
-    end
-    table.sort(opts0)
-    if #opts0 == 0 then opts0[1] = "(no players)" end
-    local hitDrop = R:CreateDropdown({
-        Name = "Target (pick a player)",
-        Flag = "PE_TargetPick1",
-        Options = opts0,
-        CurrentOption = {},
-        MultipleOptions = false,
-        Callback = function(selected)
-            local picked = selected
-            if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then
-                CFG._target = picked
-                print("[PE] target = " .. picked)
-            end
-        end,
-    })
-    targetPickers[#targetPickers + 1] = hitDrop
-    R:CreateButton({ Name = "PROBE: damage player (InflictTarget)",
-        Callback = function() G.PE.Hit(CFG._target) end })
-    R:CreateButton({ Name = "PROBE: switch team Guard",
-        Callback = function() G.PE.Team("Guard") end })
-    R:CreateButton({ Name = "PROBE: switch team Prisoner",
-        Callback = function() G.PE.Team("Prisoner") end })
 
     -- ====================== ВКЛАДКА БОЙ ======================
     local C = safeNewTab(W, "Combat", "swords", "Combat")
@@ -2844,10 +2801,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.13 stopped")
+    print("[PE] v2.14 stopped")
 end
 
-print("[PE] v2.13 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.14 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
