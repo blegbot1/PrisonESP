@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.39
+--  PRISON ESP  v2.40
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -186,6 +186,12 @@ CFG.AutoGiveName = pickOpt(CFG.AutoGiveName, {
 -- РЕТРИБУЦИЯ: получили урон — мгновенно находим атакующего
 -- (вооружённые в приоритете) и сжигаем его.
 CFG.Retr = CFG.Retr ~= false
+-- АНТИ-АФК: VirtualUser отвечает за нас на idle-проверку Roblox —
+-- долгие сессии без кика.
+CFG.AntiAFK = CFG.AntiAFK ~= false
+-- ПРЫЖОК-БУСТ: физика своего персонажа на клиенте, JumpPower наш.
+CFG.JumpBoost = CFG.JumpBoost == true
+CFG.JumpPower = tonumber(CFG.JumpPower) or 90
 
 local STOPPED = false
 local Rayfield
@@ -1318,6 +1324,17 @@ local giveConn = LP.CharacterAdded:Connect(function()
         .. " after respawn")
 end)
 
+-- АНТИ-АФК: VirtualUser дёргает контроллер при idle-событии —
+-- Roblox не кикает за бездействие.
+local afkConn = LP.Idled:Connect(function()
+    if STOPPED or not CFG.AntiAFK then return end
+    pcall(function()
+        local vu = game:GetService("VirtualUser")
+        vu:CaptureController()
+        vu:ClickButton2(Vector2.new())
+    end)
+end)
+
 -- МГНОВЕННЫЙ РЕВАЙН: на смерть — сброс в меню и возврат в команду.
 local diedConn = LP.CharacterAdded:Connect(function(ch)
     local humR = ch:WaitForChild("Humanoid", 10)
@@ -1394,6 +1411,12 @@ mainConn = RunService.RenderStepped:Connect(function()
                         e.adminWarned = true
                         warn("[PE] ADMIN ON SERVER: " .. plr.Name
                             .. " (userId " .. plr.UserId .. ") - be careful!")
+                        pcall(function()
+                            Rayfield:Notify({ Title = "ADMIN ON SERVER",
+                                Content = plr.Name .. " (userId "
+                                    .. plr.UserId .. ")",
+                                Duration = 10 })
+                        end)
                     end
                 end
 
@@ -2362,6 +2385,7 @@ local modAt = 0
 local immortalAt = 0
 local c00lAt = 0
 local retAt = 0
+local jpAt = 0
 local PE_LAST_HP = -1
 local PE_HIT_AT = 0
 local retTarget, retUntil = nil, 0
@@ -2448,6 +2472,21 @@ local function auraTick()
         if toolM and toolM:FindFirstChild("Setting")
            and not toolM:GetAttribute("PE_Marked") then
             G.PE.ModGun()
+        end
+    end
+
+    -- ПРЫЖОК-БУСТ: JumpPower — часть физики нашего персонажа,
+    -- клиент её владелец. Держим применение раз в 0.25с.
+    if CFG.JumpBoost and now - jpAt >= 0.25 then
+        jpAt = now
+        local chrJ = LP.Character
+        local humJ = chrJ and chrJ:FindFirstChildOfClass("Humanoid")
+        if humJ then
+            pcall(function()
+                humJ.UseJumpPower = true
+                humJ.JumpPower =
+                    math.clamp(tonumber(CFG.JumpPower) or 90, 50, 300)
+            end)
         end
     end
 
@@ -2754,11 +2793,16 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.39",
-        -- Сохранение настроек Rayfield выключено: оно требует writefile,
-        -- которого может не быть в исполнителе; наши настройки и так
-        -- живут в getgenv().PE.
-        ConfigurationSaving = { Enabled = false },
+        LoadingSubtitle = "ESP + Combat v2.40",
+        -- Сохранение настроек Rayfield: включаем только если в
+        -- исполнителе есть файловая система (сам Rayfield проверит
+        -- и предупредит, если нет). Наши дефолты живут в getgenv().
+        ConfigurationSaving = {
+            Enabled = type(writefile) == "function"
+                and type(makefolder) == "function",
+            FolderName = "PrisonESP",
+            FileName = "config",
+        },
     })
 
     -- ЯЗЫК МЕНЮ: getgenv().PE_LANG = "en" | "ru" (переживает
@@ -2780,6 +2824,9 @@ local okGUI, errGUI = pcall(function()
         ["Client aim (silent)"] = "Клиентский аим (сайлент)",
         ["Team & status"] = "Команда и статус",
         ["Movement"] = "Движение",
+        ["Anti-AFK (no idle kick)"] = "Анти-АФК (не кикает за бездействие)",
+        ["Jump boost (higher jumps)"] = "Прыжок-буст (выше прыгаешь)",
+        ["Jump power"] = "Сила прыжка",
         ["Spinbot (spin yourself)"] = "Спин-бот (крутиться)",
         ["Spin speed (deg/frame)"] = "Скорость вращения (град/кадр)",
         ["Switch team"] = "Сменить команду",
@@ -3327,6 +3374,18 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.FastRespawn = v end })
 
     C:CreateSection("Movement")
+    C:CreateToggle({ Name = "Anti-AFK (no idle kick)",
+        Flag = "PE_AntiAFK",
+        CurrentValue = CFG.AntiAFK ~= false,
+        Callback = function(v) CFG.AntiAFK = v end })
+    C:CreateToggle({ Name = "Jump boost (higher jumps)",
+        Flag = "PE_JumpBoost",
+        CurrentValue = CFG.JumpBoost == true,
+        Callback = function(v) CFG.JumpBoost = v end })
+    C:CreateSlider({ Name = "Jump power", Flag = "PE_JumpPower",
+        Range = {50, 300}, Increment = 5,
+        CurrentValue = math.clamp(tonumber(CFG.JumpPower) or 90, 50, 300),
+        Callback = function(v) CFG.JumpPower = v end })
     C:CreateToggle({ Name = "Anti-stun (taser/cuffs/ragdoll)", Flag = "PE_AntiStun",
         CurrentValue = CFG.AntiStun ~= false,
         Callback = function(v) CFG.AntiStun = v end })
@@ -3644,6 +3703,7 @@ G.PE_Stop = function()
     pcall(function() prConn:Disconnect() end)
     pcall(function() diedConn:Disconnect() end)
     pcall(function() giveConn:Disconnect() end)
+    pcall(function() afkConn:Disconnect() end)
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
@@ -3658,10 +3718,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.39 stopped")
+    print("[PE] v2.40 stopped")
 end
 
-print("[PE] v2.39 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.40 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
