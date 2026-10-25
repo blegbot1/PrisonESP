@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.43
+--  PRISON ESP  v2.44
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -183,6 +183,7 @@ CFG.Immortal = CFG.Immortal == true
 -- + серверный огонь => все горят и «по тихоньку» умирают.
 CFG.C00lMode = CFG.C00lMode == true
 CFG.C00lDamage = tonumber(CFG.C00lDamage) or 3
+CFG.C00lFling = CFG.C00lFling == true
 CFG.C00lTeam = pickOpt(CFG.C00lTeam, { "Everyone" }, "Everyone")
 -- ОГНЕННАЯ КИСТЬ: сервер вешает огонь на 2-й аргумент InflictTarget.
 -- Если он не проверяет принадлежность части жертве — можно передать
@@ -216,10 +217,16 @@ CFG.SpeedValue = tonumber(CFG.SpeedValue) or 40
 CFG.Noclip = CFG.Noclip == true
 CFG.Fly = CFG.Fly == true
 CFG.FlySpeed = tonumber(CFG.FlySpeed) or 60
+-- БЕСКОНЕЧНЫЙ ПРЫЖОК: JumpRequest → Jumping-состояние в воздухе.
+CFG.InfJump = CFG.InfJump == true
+-- FPS-БУСТ: минимальное качество рендера + без глобальных теней.
+CFG.FPSBoost = CFG.FPSBoost == true
+-- АУРА: максимум целей за тик (6 = дефолт, 20 = мясорубка).
+CFG.AuraMaxHits = tonumber(CFG.AuraMaxHits) or 6
 
 local STOPPED = false
 local Rayfield
-local mainConn, itemConn, auraConn, dangerConn, chamsConn, flyConn
+local mainConn, itemConn, auraConn, dangerConn, chamsConn, flyConn, ijConn
 local UIS = game:GetService("UserInputService")
 local by = {}          -- [Player] = {char, gui, lbl, box, role, vis, roleAt}
 
@@ -2089,6 +2096,21 @@ end
 -- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
 -- ЗАМЕНА ТЕКСТУР удалена (v2.37) по запросу.
 
+-- FPS-БУСТ: минимальное качество рендера + без глобальных теней.
+G.PE.FPSBoost = function(on)
+    pcall(function()
+        if on then
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+            game:GetService("Lighting").GlobalShadows = false
+            print("[PE FPS] boost ON (quality 1, shadows off)")
+        else
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+            game:GetService("Lighting").GlobalShadows = true
+            print("[PE FPS] boost OFF (defaults restored)")
+        end
+    end)
+end
+
 -- ТОЧКИ ТЕЛЕПОРТА: живут в getgenv — переживают перезапуск скрипта.
 G.PE_Waypoints = G.PE_Waypoints or {}
 G.PE.WP_Save = function(name)
@@ -2687,7 +2709,8 @@ local function auraTick()
                             remoteC:FireServer(hum, root,
                                 math.clamp(tonumber(CFG.C00lDamage) or 3,
                                     1, 20),
-                                dir, 0, 0, burnC)
+                                dir,
+                                CFG.C00lFling and 20000 or 0, 0, burnC)
                         end)
                     end
                 end
@@ -2840,7 +2863,9 @@ local function auraTick()
     local myTeam = LP.Team
     local hits = 0
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP and hits < 6 then
+        -- Максимум целей за тик (слайдер AuraMaxHits).
+        if p ~= LP and hits
+            < math.clamp(tonumber(CFG.AuraMaxHits) or 6, 1, 20) then
             local ch = p.Character
             local hum = ch and ch:FindFirstChildOfClass("Humanoid")
             local root = ch and ch:FindFirstChild("HumanoidRootPart")
@@ -2971,6 +2996,19 @@ flyConn = RunService.Heartbeat:Connect(function()
     end)
 end)
 
+-- БЕСКОНЕЧНЫЙ ПРЫЖОК: каждый JumpRequest в воздухе перезапускает
+-- Jumping-состояние (физика наша — сервер видит только позицию).
+ijConn = UIS.JumpRequest:Connect(function()
+    if STOPPED or not CFG.InfJump then return end
+    local hum = LP.Character
+        and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health > 0 then
+        pcall(function()
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end)
+    end
+end)
+
 -- СПИН-БОТ удалён (v2.37) по запросу: при выключении AutoRotate
 -- не возвращался и персонаж переставал поворачиваться.
 
@@ -3054,7 +3092,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.43",
+        LoadingSubtitle = "ESP + Combat v2.44",
         -- Сохранение настроек Rayfield: включаем только если в
         -- исполнителе есть файловая система (сам Rayfield проверит
         -- и предупредит, если нет). Наши дефолты живут в getgenv().
@@ -3147,6 +3185,10 @@ local okGUI, errGUI = pcall(function()
         ["AUTO-ESCAPE (tp to zone and back)"] = "АВТО-ПОБЕГ (тп на зону и назад)",
         ["Kill aura"] = "Килл-аура", ["Aura radius"] = "Радиус ауры",
         ["Damage per shot"] = "Урон за выстрел", ["Tick delay"] = "Задержка тика",
+        ["Max targets per tick"] = "Целей за тик",
+        ["Infinite jump (jump in air)"] = "Бесконечный прыжок (в воздухе)",
+        ["FPS boost (low graphics)"] = "ФПС-буст (низкая графика)",
+        ["C00l fling (throw everyone)"] = "C00l-флинг (швырять всех)",
         ["Who to hit"] = "Кого бить",
         ["Lifesteal (heal self per hit)"] = "Вампиризм (хил за удар)",
         ["Fling targets (mega knockback up)"] = "Подброс жертв (мега-отдача)",
@@ -3499,6 +3541,10 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = math.clamp(
             math.floor((tonumber(CFG.KillAuraDelay) or 0.15) * 100 + 0.5), 10, 100),
         Suffix = " x10ms", Callback = function(v) CFG.KillAuraDelay = v / 100 end })
+    C:CreateSlider({ Name = "Max targets per tick", Flag = "PE_AuraMaxHits",
+        Range = {1, 20}, Increment = 1,
+        CurrentValue = math.clamp(tonumber(CFG.AuraMaxHits) or 6, 1, 20),
+        Callback = function(v) CFG.AuraMaxHits = v end })
     local hitDrop = C:CreateDropdown({
         Name = "Who to hit",
         Flag = "PE_KillAuraTeamPick",
@@ -3623,6 +3669,10 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_C00lMode",
         CurrentValue = CFG.C00lMode == true,
         Callback = function(v) CFG.C00lMode = v end })
+    C:CreateToggle({ Name = "C00l fling (throw everyone)",
+        Flag = "PE_C00lFling",
+        CurrentValue = CFG.C00lFling == true,
+        Callback = function(v) CFG.C00lFling = v end })
     C:CreateSlider({ Name = "Burn damage per tick", Flag = "PE_C00lDamage",
         Range = {1, 20}, Increment = 1,
         CurrentValue = math.clamp(tonumber(CFG.C00lDamage) or 3, 1, 20),
@@ -3698,6 +3748,17 @@ local okGUI, errGUI = pcall(function()
         Range = {10, 300}, Increment = 10,
         CurrentValue = math.clamp(tonumber(CFG.FlySpeed) or 60, 10, 300),
         Callback = function(v) CFG.FlySpeed = v end })
+    C:CreateToggle({ Name = "Infinite jump (jump in air)",
+        Flag = "PE_InfJump",
+        CurrentValue = CFG.InfJump == true,
+        Callback = function(v) CFG.InfJump = v end })
+    C:CreateToggle({ Name = "FPS boost (low graphics)",
+        Flag = "PE_FPSBoost",
+        CurrentValue = CFG.FPSBoost == true,
+        Callback = function(v)
+            CFG.FPSBoost = v
+            if G.PE.FPSBoost then G.PE.FPSBoost(v) end
+        end })
     C:CreateButton({ Name = "TP to crosshair (blink)",
         Callback = function() G.PE.TPCrosshair() end })
     C:CreateInput({ Name = "Waypoint name",
@@ -4068,6 +4129,7 @@ G.PE_Stop = function()
     pcall(function() clickConn:Disconnect() end)
     pcall(function() auraConn:Disconnect() end)
     pcall(function() flyConn:Disconnect() end)
+    pcall(function() ijConn:Disconnect() end)
     pcall(function()
         local chrS = LP.Character
         local humS = chrS and chrS:FindFirstChildOfClass("Humanoid")
@@ -4094,16 +4156,18 @@ G.PE_Stop = function()
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     G.PE.FakeShot = nil
     G.PE.WP_Save, G.PE.WP_TP, G.PE.TPCrosshair = nil, nil, nil
+    pcall(function() G.PE.FPSBoost(false) end)
+    G.PE.FPSBoost = nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.43 stopped")
+    print("[PE] v2.44 stopped")
 end
 
-print("[PE] v2.43 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.44 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
