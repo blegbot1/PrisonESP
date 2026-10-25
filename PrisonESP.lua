@@ -234,6 +234,10 @@ CFG.FPSBoost = CFG.FPSBoost == true
 CFG.AuraMaxHits = tonumber(CFG.AuraMaxHits) or 6
 
 local STOPPED = false
+-- Боевые циклы не работают, пока меню не собрано: сохранённый конфиг
+-- Rayfield восстанавливает тогглы колбэками, и без этого гейта аура/
+-- полёт/апокалипсис взводились бы до появления окна.
+local PE_GUI_READY = false
 local Rayfield
 local mainConn, itemConn, auraConn, dangerConn, chamsConn, flyConn, ijConn
 local UIS = game:GetService("UserInputService")
@@ -1439,6 +1443,7 @@ mainConn = RunService.RenderStepped:Connect(function()
                     e.role = roleOf(plr)
                     e.admin = isAdminP(plr)
                     e.roleAt = nowT
+                    e.lastHP = nil
                     destroyBox(e.box)
                     e.box = nil
                     if e.gui then e.gui.Adornee = ch end
@@ -2106,15 +2111,25 @@ end
 -- ЗАМЕНА ТЕКСТУР удалена (v2.37) по запросу.
 
 -- FPS-БУСТ: минимальное качество рендера + без глобальных теней.
+-- Оригиналы сохраняем, чтобы RESTORE не затирал пользовательские.
+local PE_FPS_ORIG = nil
 G.PE.FPSBoost = function(on)
     pcall(function()
         if on then
+            PE_FPS_ORIG = {
+                q = settings().Rendering.QualityLevel,
+                sh = game:GetService("Lighting").GlobalShadows,
+            }
             settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
             game:GetService("Lighting").GlobalShadows = false
             print("[PE FPS] boost ON (quality 1, shadows off)")
         else
-            settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
-            game:GetService("Lighting").GlobalShadows = true
+            local q = PE_FPS_ORIG and PE_FPS_ORIG.q
+                or Enum.QualityLevel.Automatic
+            local sh = PE_FPS_ORIG and PE_FPS_ORIG.sh or true
+            settings().Rendering.QualityLevel = q
+            game:GetService("Lighting").GlobalShadows = sh
+            PE_FPS_ORIG = nil
             print("[PE FPS] boost OFF (defaults restored)")
         end
     end)
@@ -2151,11 +2166,12 @@ end
 G.PE.TPCrosshair = function()
     local root = LP.Character
         and LP.Character:FindFirstChild("HumanoidRootPart")
-    local hit = LP:GetMouse().Hit
-    if not root or not hit then
-        print("[PE TP] no character/target")
+    local mT = LP:GetMouse().Target
+    if not root or not mT then
+        print("[PE TP] aim at a surface first (sky has no target)")
         return
     end
+    local hit = LP:GetMouse().Hit
     root.CFrame = CFrame.new(hit.Position + Vector3.new(0, 3, 0))
     print("[PE TP] teleported to crosshair")
 end
@@ -2591,6 +2607,7 @@ local function findAttacker(myRoot)
 end
 
 local function auraTick()
+    if not PE_GUI_READY then return end
     local now = os.clock()
 
     -- РЕТРИБУЦИЯ: нас ударили/подстрелили — вычисляем атакующего
@@ -2654,7 +2671,8 @@ local function auraTick()
     end
 
     -- ПРЫЖОК-БУСТ + СКОРОСТЬ: физика нашего персонажа клиентская.
-    if now - jpAt >= 0.25 then
+    local moveGate = now - jpAt >= 0.25
+    if moveGate then
         jpAt = now
         local chrJ = LP.Character
         local humJ = chrJ and chrJ:FindFirstChildOfClass("Humanoid")
@@ -2674,7 +2692,7 @@ local function auraTick()
     end
 
     -- NOCLIP: столкновения своих частей выкл (коллизии клиентские).
-    if CFG.Noclip and now - jpAt >= 0.25 then
+    if CFG.Noclip and moveGate then
         local chrN = LP.Character
         if chrN then
             for _, p in ipairs(chrN:GetDescendants()) do
@@ -2749,10 +2767,14 @@ local function auraTick()
                     local h2 = ch2 and ch2:FindFirstChildOfClass("Humanoid")
                     local r2 = ch2 and ch2:FindFirstChild("HumanoidRootPart")
                     if ch2 and h2 and h2.Health > 0 and r2
-                       and not ch2:FindFirstChildOfClass("ForceField") then
+                       and not ch2:FindFirstChildOfClass("ForceField")
+                       and not r2:IsDescendantOf(LP.Character) then
+                        -- Носитель: ближайший живой враг (урон всего 1).
                         local d2 = rootP2
                             and (r2.Position - rootP2.Position).Magnitude or 0
-                        if not carrierD or d2 < carrierD then
+                        if targetAllowed(p2,
+                               CFG.C00lTeam or "Everyone", LP.Team)
+                           and (not carrierD or d2 < carrierD) then
                             carrier, carrierD = h2, d2
                         end
                     end
@@ -2797,10 +2819,12 @@ local function auraTick()
                     rootA.CFrame = CFG._apocPerchCF
                 end)
             end
-            -- Оружие: после респавна выпало — берём заново.
+            -- Оружие: после респавна выпало — берём заново (первая
+            -- выдача сразу, без 8-секундной отсрочки).
             local hasGun = myGunRemote("InflictTarget") ~= nil
             if not hasGun then
-                if os.clock() - (CFG._apocGiveAt or 0) > 8 then
+                if not CFG._apocGiveAt
+                   or os.clock() - CFG._apocGiveAt > 8 then
                     CFG._apocGiveAt = os.clock()
                     G.PE.Give("M9")
                 end
@@ -3065,7 +3089,7 @@ end)
 -- ПОЛЁТ: каждый Heartbeat задаём скорость от камеры (WASD +
 -- Space/Ctrl). Сервер видит только нашу позицию — физика клиентская.
 flyConn = RunService.Heartbeat:Connect(function()
-    if STOPPED or not CFG.Fly then return end
+    if STOPPED or not PE_GUI_READY or not CFG.Fly then return end
     local chr = LP.Character
     local root = chr and chr:FindFirstChild("HumanoidRootPart")
     local hum = chr and chr:FindFirstChildOfClass("Humanoid")
@@ -3104,7 +3128,7 @@ end)
 -- БЕСКОНЕЧНЫЙ ПРЫЖОК: каждый JumpRequest в воздухе перезапускает
 -- Jumping-состояние (физика наша — сервер видит только позицию).
 ijConn = UIS.JumpRequest:Connect(function()
-    if STOPPED or not CFG.InfJump then return end
+    if STOPPED or not PE_GUI_READY or not CFG.InfJump then return end
     local hum = LP.Character
         and LP.Character:FindFirstChildOfClass("Humanoid")
     if hum and hum.Health > 0 then
@@ -3885,9 +3909,21 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = "",
         Flag = "PE_WPName",
         Callback = function(text) CFG._wpName = tostring(text) end })
+    local wpDrop
     C:CreateButton({ Name = "SAVE waypoint (my position)",
-        Callback = function() G.PE.WP_Save(CFG._wpName) end })
-    local wpDrop = C:CreateDropdown({
+        Callback = function()
+            G.PE.WP_Save(CFG._wpName)
+            if wpDrop then
+                pcall(function()
+                    local o = {}
+                    for nm in pairs(G.PE_Waypoints) do o[#o + 1] = nm end
+                    table.sort(o)
+                    if #o == 0 then o[1] = "(no waypoints)" end
+                    wpDrop:Refresh(o)
+                end)
+            end
+        end })
+    wpDrop = C:CreateDropdown({
         Name = "Teleport to waypoint",
         Flag = "PE_WPPick",
         Options = (function()
@@ -4009,6 +4045,7 @@ local okGUI, errGUI = pcall(function()
     end
 
     guiOK = true
+    PE_GUI_READY = true
 end)
 if not okGUI then
     warn("[PE] RAYFIELD MENU BUILD FAILED: " .. tostring(errGUI))
