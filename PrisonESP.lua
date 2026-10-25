@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.28
+--  PRISON ESP  v2.29
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -1941,14 +1941,20 @@ G.PE.GiveAll = function()
 end
 
 -- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
--- ЗАМЕНА ТЕКСТУР (локально): небо + все декали/текстуры -> любая
--- картинка по decal id. Восстановление хранит оригиналы.
+-- ЗАМЕНА ТЕКСТУР (локально): небо + все декали + ТЕКСТУРА НА КАЖДОЙ
+-- грани каждой крупной части мира (картинка тайлится по стенам).
+-- Восстановление хранит оригиналы и список созданных Texture.
 local PE_TEX_ORIG = setmetatable({}, { __mode = "k" })
+local PE_TEX_MADE = {}
 local PE_TEX_SKY_MADE = false
 G.PE.TexAll = function()
     local id = tostring(CFG.TexID or ""):gsub("%D", "")
     if id == "" then
         print("[PE TEX] paste a decal image id first (any image!)")
+        return
+    end
+    if #PE_TEX_MADE > 0 then
+        print("[PE TEX] already applied - press RESTORE first")
         return
     end
     local asset = "rbxassetid://" .. id
@@ -1976,20 +1982,54 @@ G.PE.TexAll = function()
             n = n + 1
         end
     end
+    local faces = {
+        Enum.NormalId.Front, Enum.NormalId.Back, Enum.NormalId.Top,
+        Enum.NormalId.Bottom, Enum.NormalId.Left, Enum.NormalId.Right,
+    }
+    -- Один проход: существующие декали подменяем, крупным частям
+    -- вешаем Texture на все 6 граней (тайл 8х8 стадов).
     for _, d in ipairs(workspace:GetDescendants()) do
-        if (d:IsA("Decal") or d:IsA("Texture")) and d.Texture ~= "" then
-            if PE_TEX_ORIG[d] == nil then
-                PE_TEX_ORIG[d] = d.Texture
+        if d:IsA("Decal") or d:IsA("Texture") then
+            if d.Texture ~= "" then
+                if PE_TEX_ORIG[d] == nil then
+                    PE_TEX_ORIG[d] = d.Texture
+                end
+                pcall(function() d.Texture = asset end)
+                n = n + 1
             end
-            pcall(function() d.Texture = asset end)
-            n = n + 1
+        elseif d:IsA("BasePart") and not d:IsA("Terrain") then
+            local sz = d.Size
+            if sz.X >= 4 and sz.Y >= 2 and sz.Z >= 4 then
+                for _, face in ipairs(faces) do
+                    local ok, tx = pcall(function()
+                        local t = Instance.new("Texture")
+                        t.Texture = asset
+                        t.Face = face
+                        t.StudsPerTileU = 8
+                        t.StudsPerTileV = 8
+                        t.Parent = d
+                        return t
+                    end)
+                    if ok and tx then
+                        PE_TEX_MADE[#PE_TEX_MADE + 1] = tx
+                        n = n + 1
+                    end
+                end
+            end
         end
     end
-    print("[PE TEX] " .. n .. " textures -> " .. asset
+    print("[PE TEX] " .. n .. " surfaces -> " .. asset
         .. " (visible ONLY to you)")
 end
 G.PE.TexRestore = function()
     local n = 0
+    for _, tx in ipairs(PE_TEX_MADE) do
+        if tx and tx.Parent then
+            pcall(function() tx:Destroy() end)
+        end
+        n = n + 1
+    end
+    PE_TEX_MADE = {}
     for obj, v in pairs(PE_TEX_ORIG) do
         if typeof(obj) == "Instance" and obj.Parent then
             if obj:IsA("Sky") and type(v) == "table" then
@@ -2009,7 +2049,7 @@ G.PE.TexRestore = function()
         PE_TEX_SKY_MADE = false
     end
     PE_TEX_ORIG = setmetatable({}, { __mode = "k" })
-    print("[PE TEX] restored " .. n .. " textures")
+    print("[PE TEX] restored " .. n .. " surfaces")
 end
 
 G.PE.ShopInfo = function()
@@ -2923,7 +2963,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.28",
+        LoadingSubtitle = "ESP + Combat v2.29",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3431,7 +3471,7 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = tostring(CFG.TexID or ""),
         Flag = "PE_TexID",
         Callback = function(text) CFG.TexID = tostring(text) end })
-    C:CreateButton({ Name = "REPLACE ALL TEXTURES (sky + decals)",
+    C:CreateButton({ Name = "REPLACE ALL TEXTURES (sky + every wall)",
         Callback = function() G.PE.TexAll() end })
     C:CreateButton({ Name = "RESTORE textures",
         Callback = function() G.PE.TexRestore() end })
@@ -3754,10 +3794,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.28 stopped")
+    print("[PE] v2.29 stopped")
 end
 
-print("[PE] v2.28 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.29 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
