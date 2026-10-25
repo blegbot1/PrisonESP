@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.49
+--  PRISON ESP  v2.51
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -73,7 +73,7 @@ CFG.HPPercent  = CFG.HPPercent  == true
 CFG.ShowSpeed  = CFG.ShowSpeed  == true
 CFG.NameHPColor = CFG.NameHPColor == true -- цвет ника по HP
 CFG.HideDead   = CFG.HideDead   ~= false
-CFG.LabelSize  = tonumber(CFG.LabelSize) or 13
+CFG.LabelSize  = math.clamp(tonumber(CFG.LabelSize) or 13, 9, 24)
 CFG.MaxDist    = tonumber(CFG.MaxDist) or 900   -- 0 = без лимита
 
 -- ---------- ESP: коробки ----------
@@ -90,12 +90,12 @@ CFG.Skeleton      = CFG.Skeleton == true
 CFG.SkeletonThick = tonumber(CFG.SkeletonThick) or 1
 CFG.SkelMinDist   = tonumber(CFG.SkelMinDist) or 12
 CFG.HealthBars    = CFG.HealthBars ~= false
-CFG.HealthBarWidth  = tonumber(CFG.HealthBarWidth) or 40
-CFG.HealthBarHeight = tonumber(CFG.HealthBarHeight) or 4
+CFG.HealthBarWidth  = math.clamp(tonumber(CFG.HealthBarWidth) or 40, 2, 200)
+CFG.HealthBarHeight = math.clamp(tonumber(CFG.HealthBarHeight) or 4, 2, 20)
 CFG.HPBarText     = CFG.HPBarText ~= false
 CFG.HPGradient    = CFG.HPGradient ~= false
 CFG.HeadBox       = CFG.HeadBox ~= false
-CFG.HeadBoxSize   = tonumber(CFG.HeadBoxSize) or 22
+CFG.HeadBoxSize   = math.clamp(tonumber(CFG.HeadBoxSize) or 22, 4, 100)
 CFG.HeadBoxRole   = CFG.HeadBoxRole ~= false
 CFG.HeadBoxColor  = safeColor(CFG.HeadBoxColor, Color3.new(1, 0, 0))
 CFG.Snaplines     = CFG.Snaplines ~= false
@@ -111,7 +111,7 @@ CFG.LiteESP       = CFG.LiteESP == true
 
 -- ---------- ESP: миникарта ----------
 CFG.Minimap     = CFG.Minimap == true
-CFG.MinimapSize = tonumber(CFG.MinimapSize) or 160
+CFG.MinimapSize = math.clamp(tonumber(CFG.MinimapSize) or 160, 40, 400)
 CFG.MinimapSelf = CFG.MinimapSelf ~= false
 
 -- ---------- ESP: предметы на земле ----------
@@ -119,9 +119,15 @@ CFG.Items = CFG.Items ~= false
 
 -- ---------- БОЕВЫЕ ----------
 CFG.KillAura       = CFG.KillAura == true
-CFG.KillAuraRadius = tonumber(CFG.KillAuraRadius) or 40
+CFG.KillAuraRadius = math.max(0, tonumber(CFG.KillAuraRadius) or 40)
 CFG.KillAuraDelay  = tonumber(CFG.KillAuraDelay) or 0.15
-CFG.KillAuraTeam   = pickOpt(CFG.KillAuraTeam, { "Everyone" }, "Everyone")
+-- Цель ауры: «Everyone» или НИК игрока (переживает рестарт скрипта).
+-- Whitelist здесь только для «Everyone» — ники принимаем как есть,
+-- иначе pickOpt молча сбрасывал сохранённую цель во «Everyone» и
+-- после перезагрузки аура внезапно била всех вместо одного.
+CFG.KillAuraTeam   = (type(CFG.KillAuraTeam) == "string"
+    and CFG.KillAuraTeam ~= "")
+    and CFG.KillAuraTeam or "Everyone"
 -- АНТИ-СТАН: тазер/наручники/регдолл не должны останавливать.
 CFG.AntiStun = CFG.AntiStun ~= false
 -- Урон килл-ауры и бесконечные патроны. Подписура InflictTarget взята
@@ -178,16 +184,19 @@ CFG.InvisWall = CFG.InvisWall == true
 CFG.ModGunAuto = CFG.ModGunAuto ~= false
 -- АДМИНЫ: подсветка магентой + [ADMIN] + алерт в консоль при входе.
 CFG.AdminESP = CFG.AdminESP ~= false
--- БЕССМЕРТИЕ: цикл вампиризма БЕЗ жертвы — раз в 0.5с шлём
--- InflictTarget по СЕБЕ: урон 0, вампиризм 1000000. Никого не
--- задеваем, ни огня, ни пуль — сервер просто хилит нас.
+-- БЕССМЕРТИЕ: сервер самохил ОТВЕРГАЕТ (свой тим-чек, подтверждено
+-- вживую), поэтому хил двухтактный: self-пакет (0 урона + 1e6
+-- вампиризма — вдруг чек только на урон>0) + РЕАКТИВНЫЙ тап по
+-- ближайшему живому врагу при получении урона (1 урона + 1e6
+-- вампиризма): вампиризм лечит только по реальной жертве-врагу.
 CFG.Immortal = CFG.Immortal == true
 -- C00LKIDD MODE (2014): медленное сожжение ВСЕХ — крошечный урон
 -- + серверный огонь => все горят и «по тихоньку» умирают.
 CFG.C00lMode = CFG.C00lMode == true
 CFG.C00lDamage = tonumber(CFG.C00lDamage) or 3
 CFG.C00lFling = CFG.C00lFling == true
-CFG.C00lTeam = pickOpt(CFG.C00lTeam, { "Everyone" }, "Everyone")
+CFG.C00lTeam = (type(CFG.C00lTeam) == "string"
+    and CFG.C00lTeam ~= "") and CFG.C00lTeam or "Everyone"
 -- ОГНЕННАЯ КИСТЬ: сервер вешает огонь на 2-й аргумент InflictTarget.
 -- Если он не проверяет принадлежность части жертве — можно передать
 -- блок стены/пола и РИСОВАТЬ ОГНЁМ курсором. Носитель урона —
@@ -2455,7 +2464,7 @@ G.PE.ModGun = function(dmg)
     -- Горящие пули: поджигает цель (серверный IgniteScript).
     S.FlamingBullet = CFG.GunFire == true
     -- Отдача: подбрасывает жертву (потолок — не палимся).
-    S.Knockback = math.min(tonumber(CFG.GunKnockback) or 0, 20000)
+    S.Knockback = math.clamp(tonumber(CFG.GunKnockback) or 0, 0, 20000)
     -- Дробовик: N пуль за выстрел (урон умножается).
     if CFG.GunShotgun then
         S.ShotgunEnabled = true
@@ -2594,6 +2603,7 @@ local auraAt = 0
 local stunAt = 0
 local modAt = 0
 local immortalAt = 0
+local immortalTapAt = 0
 local c00lAt = 0
 local retAt = 0
 local jpAt = 0
@@ -2785,7 +2795,8 @@ local function auraTick()
                     local r2 = ch2 and ch2:FindFirstChild("HumanoidRootPart")
                     if ch2 and h2 and h2.Health > 0 and r2
                        and not ch2:FindFirstChildOfClass("ForceField")
-                       and not r2:IsDescendantOf(LP.Character) then
+                       and not (LP.Character
+                           and r2:IsDescendantOf(LP.Character)) then
                         -- Носитель: ближайший живой враг (урон всего 1).
                         local d2 = rootP2
                             and (r2.Position - rootP2.Position).Magnitude or 0
@@ -2912,10 +2923,13 @@ local function auraTick()
         end
     end
 
-    -- БЕССМЕРТИЕ: вампиризм без жертвы. Хилим РЕАКТИВНО — как только
-    -- HP упал (каждый кадр проверяем), плюс держим тонус раз в 0.15с.
-    -- Против ваншотов (100+ за один пакет) спасает только убийство
-    -- атакующего первым — выбери его ник в «Who to hit».
+    -- БЕССМЕРТИЕ: вампиризм. Сервер отвергает вызовы по себе, поэтому
+    -- два пути хила: self-пакет (0 урона + 1e6 — страховка на случай,
+    -- если чек сервера только на урон>0) и при полученном уроне — тап
+    -- по ближайшему живому врагу (1 урона + 1e6 вампиризма): это
+    -- единственный подтверждённый рабочий способ лечения. Против
+    -- ваншотов (100+ за пакет) спасает только убийство атакующего
+    -- первым — выбери его ник в «Who to hit».
     if CFG.Immortal then
         local chrI = LP.Character
         local humI = chrI and chrI:FindFirstChildOfClass("Humanoid")
@@ -2923,13 +2937,47 @@ local function auraTick()
         local remoteI = myGunRemote("InflictTarget")
         if remoteI and humI and rootI and humI.Health > 0 then
             local damaged = humI.Health < humI.MaxHealth - 0.5
-            if (damaged and now - immortalAt >= 0.05)
-               or ((not damaged) and now - immortalAt >= 0.15) then
+            if (damaged and now - immortalAt >= 0.1)
+               or ((not damaged) and now - immortalAt >= 0.5) then
                 immortalAt = now
                 pcall(function()
                     remoteI:FireServer(humI, rootI, 0,
                         Vector3.new(0, 0, 1), 0, 1000000, false)
                 end)
+                if damaged and now - immortalTapAt >= 0.3 then
+                    immortalTapAt = now
+                    -- Ближайший живой враг без ForceField.
+                    local bestP2, bestD2
+                    for _, p3 in ipairs(Players:GetPlayers()) do
+                        if p3 ~= LP then
+                            local ch3 = p3.Character
+                            local h3 = ch3
+                                and ch3:FindFirstChildOfClass("Humanoid")
+                            local r3 = ch3
+                                and ch3:FindFirstChild("HumanoidRootPart")
+                            if ch3 and h3 and h3.Health > 0 and r3
+                               and not ch3:FindFirstChildOfClass("ForceField")
+                               and targetAllowed(p3, "Everyone", LP.Team) then
+                                local d3 = (r3.Position
+                                    - rootI.Position).Magnitude
+                                if not bestD2 or d3 < bestD2 then
+                                    bestP2, bestD2 = p3, d3
+                                end
+                            end
+                        end
+                    end
+                    local chB = bestP2 and bestP2.Character
+                    local humB = chB
+                        and chB:FindFirstChildOfClass("Humanoid")
+                    local headB = chB and (chB:FindFirstChild("Head")
+                        or chB:FindFirstChild("HumanoidRootPart"))
+                    if humB and headB and humB.Health > 0 then
+                        pcall(function()
+                            remoteI:FireServer(humB, headB, 1,
+                                Vector3.new(0, 1, 0), 0, 1000000, false)
+                        end)
+                    end
+                end
             end
         end
     end
@@ -3056,7 +3104,11 @@ local function auraTick()
                             -- рандом (пинбол).
                             local fd = CFG.FlingDir or "Up"
                             if fd == "Away from me" then
-                                dir = delta.Unit
+                                -- Цель вплотную: delta.Unit = NaN-вектор,
+                                -- уходит в серверный подброс — гард.
+                                if delta.Magnitude > 0.01 then
+                                    dir = delta.Unit
+                                end
                             elseif fd == "Random" then
                                 dir = Vector3.new(
                                     math.random() - 0.5,
@@ -3243,7 +3295,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.49",
+        LoadingSubtitle = "ESP + Combat v2.51",
         -- Сохранение настроек Rayfield: включаем только если в
         -- исполнителе есть файловая система (сам Rayfield проверит
         -- и предупредит, если нет). Наши дефолты живут в getgenv().
@@ -4082,7 +4134,7 @@ local okGUI, errGUI = pcall(function()
             end })
         ST:CreateSection("Info")
         ST:CreateParagraph({ Title = "Version",
-            Content = "PRISON ESP v2.37. ESP + Combat. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.TeamOf(name), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "PRISON ESP v2.51. ESP + Combat. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.TeamOf(name), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
@@ -4149,8 +4201,17 @@ local function rescueRayfield()
     end
 end
 task.delay(0.2, rescueRayfield)
-task.delay(1, rescueRayfield)
-task.delay(2.5, rescueRayfield)
+-- Долгий HttpGet: интерфейс мог появиться ПОСЛЕ статических проверок —
+-- ловим появление ScreenGui до 15 с (наша копия сразу в PlayerGui —
+-- выходим сразу, запасные URL кладут в gethui/CoreGui).
+task.spawn(function()
+    for _ = 1, 15 do
+        if STOPPED then break end
+        rescueRayfield()
+        if rfMovedN > 0 or rfSource == RF_URLS[1] then break end
+        task.wait(1)
+    end
+end)
 
 -- ============================================================
 --  ДИАГНОСТИКА: PE.Diag() + логгер каждого клика.
@@ -4339,6 +4400,19 @@ G.PE_Stop = function()
             end
         end
     end)
+    -- Анти-стан запрещал регдолл-состояния навсегда: после выгрузки
+    -- возвращаем, иначе тазер/регдолл не валят до следующего респавна.
+    pcall(function()
+        local chrS = LP.Character
+        local humS = chrS and chrS:FindFirstChildOfClass("Humanoid")
+        if humS then
+            humS:SetAttribute("PE_NoRagdoll", nil)
+            for _, stName in ipairs({ "Ragdoll", "FallingDown",
+                "PlatformStanding" }) do
+                humS:SetStateEnabled(Enum.HumanoidStateType[stName], true)
+            end
+        end
+    end)
     pcall(function() paConn:Disconnect() end)
     pcall(function() prConn:Disconnect() end)
     pcall(function() diedConn:Disconnect() end)
@@ -4371,10 +4445,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.49 stopped")
+    print("[PE] v2.51 stopped")
 end
 
-print("[PE] v2.49 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.51 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
