@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.47
+--  PRISON ESP  v2.49
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -170,6 +170,9 @@ CFG.GunAmmoHack = CFG.GunAmmoHack == true
 CFG.GunScope = CFG.GunScope == true
 -- ОПАСНЫЕ ЗОНЫ: Death Part подсветка + телепорт к зоне побега.
 CFG.DangerESP = CFG.DangerESP == true
+-- НЕВИДИМЫЕ СТЕНЫ: периметр тюрьмы невидим (132 стены Tr=0.95) —
+-- подсветка голубым, чтобы флай не бился в пустоту.
+CFG.InvisWall = CFG.InvisWall == true
 -- АВТО-ПРОКАЧКА: новая пушка в руках (респавн/смена) — апгрейд
 -- применяется сам, кнопку жать не надо.
 CFG.ModGunAuto = CFG.ModGunAuto ~= false
@@ -1729,7 +1732,20 @@ dangerConn = RunService.Heartbeat:Connect(function()
         local seen = {}
         if full then
             for _, m in ipairs(workspace:GetDescendants()) do
-                if m:IsA("BasePart") and DANGER_COLORS[m.Name] then
+                local col
+                if m:IsA("BasePart") then
+                    col = DANGER_COLORS[m.Name]
+                    -- Невидимые коллизионные стены: периметр тюрьмы
+                    -- невидим (Smooth Block Model, Tr 0.95) — на флай
+                    -- в него врезаются. Подсвечиваем голубым.
+                    if not col and CFG.InvisWall
+                       and m.Name == "Smooth Block Model"
+                       and m.CanCollide and m.Transparency >= 0.9
+                       and (m.Size.X + m.Size.Y + m.Size.Z) >= 25 then
+                        col = Color3.fromRGB(160, 200, 255)
+                    end
+                end
+                if col then
                     seen[m] = true
                     local h = byDanger[m]
                     if not h or not h.Parent then
@@ -1744,7 +1760,6 @@ dangerConn = RunService.Heartbeat:Connect(function()
                         end
                     end
                     if h then
-                        local col = DANGER_COLORS[m.Name]
                         h.FillColor = col
                         h.OutlineColor = col
                         h.Enabled = true
@@ -3221,7 +3236,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.47",
+        LoadingSubtitle = "ESP + Combat v2.49",
         -- Сохранение настроек Rayfield: включаем только если в
         -- исполнителе есть файловая система (сам Rayfield проверит
         -- и предупредит, если нет). Наши дефолты живут в getgenv().
@@ -3311,6 +3326,7 @@ local okGUI, errGUI = pcall(function()
         ["Others color"] = "Цвет остальных",
         ["Guns/keycards/ammo on ground"] = "Пушки/пропуска/патроны на земле",
         ["Danger/escape zones ESP"] = "ЕСП зон побега и опасности",
+        ["Invisible walls ESP (perimeter)"] = "ЕСП невидимых стен (периметр)",
         ["AUTO-ESCAPE (tp to zone and back)"] = "АВТО-ПОБЕГ (тп на зону и назад)",
         ["Kill aura"] = "Килл-аура", ["Aura radius"] = "Радиус ауры",
         ["Damage per shot"] = "Урон за выстрел", ["Tick delay"] = "Задержка тика",
@@ -3638,6 +3654,10 @@ local okGUI, errGUI = pcall(function()
     T:CreateToggle({ Name = "Danger/escape zones ESP", Flag = "PE_DangerESP",
         CurrentValue = CFG.DangerESP == true,
         Callback = function(v) CFG.DangerESP = v end })
+    T:CreateToggle({ Name = "Invisible walls ESP (perimeter)",
+        Flag = "PE_InvisWall",
+        CurrentValue = CFG.InvisWall == true,
+        Callback = function(v) CFG.InvisWall = v end })
     T:CreateToggle({ Name = "AUTO-ESCAPE (tp to zone and back)",
         Flag = "PE_AutoEscape",
         CurrentValue = false,
@@ -4327,10 +4347,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.47 stopped")
+    print("[PE] v2.49 stopped")
 end
 
-print("[PE] v2.47 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.49 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
