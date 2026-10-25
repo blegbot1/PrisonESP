@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.12
+--  PRISON ESP  v2.13
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -130,17 +130,6 @@ CFG.KillAuraTeam   = pickOpt(CFG.KillAuraTeam, {
 CFG.CuffAura = CFG.CuffAura == true
 CFG.CuffTeam = pickOpt(CFG.CuffTeam, {
     "Everyone", "Except my team" }, "Except my team")
--- PUNCH-АУРА: FistEvent("Punch") — сервер бьёт того, кто рядом.
-CFG.PunchAura = CFG.PunchAura == true
-CFG.PunchDelay = tonumber(CFG.PunchDelay) or 0.25
--- Подлёт ВКЛ по умолчанию: сервер кулаков бьёт только вплотную,
--- поэтому аура сама телепортируется к жертве и возвращается.
-CFG.PunchTele  = CFG.PunchTele ~= false
--- СТОЯТЬ У ЦЕЛИ: телепорт один раз и остаёмся рядом — удары без
--- возвратов, максимальная частота. Дом вернём при выключении ауры.
-CFG.PunchStay  = CFG.PunchStay ~= false
-CFG.PunchTeam  = pickOpt(CFG.PunchTeam, {
-    "Everyone", "Except my team" }, "Except my team")
 -- АНТИ-СТАН: тазер/наручники/регдолл не должны останавливать.
 CFG.AntiStun = CFG.AntiStun ~= false
 -- Урон килл-ауры и бесконечные патроны. Подписура InflictTarget взята
@@ -148,6 +137,11 @@ CFG.AntiStun = CFG.AntiStun ~= false
 -- направление, отдача, вампиризм, поджог).
 CFG.KillAuraDamage = tonumber(CFG.KillAuraDamage) or 50
 CFG.ModGunDamage = tonumber(CFG.ModGunDamage) or 250
+-- ВАМПИРИЗМ АУРЫ: 6-й аргумент InflictTarget лечит стрелка на эту
+-- величину за каждый удар — псевдо-бессмертие, пока аура бьёт.
+-- Подброс жертв — 5-й аргумент (отдача вверх).
+CFG.AuraLifesteal = CFG.AuraLifesteal ~= false
+CFG.AuraFling = CFG.AuraFling == true
 
 local STOPPED = false
 local Rayfield
@@ -1950,9 +1944,8 @@ local function targetAllowed(p, mode, myTeam)
     return true
 end
 
--- Цикл: cuff-аура, punch-аура, килл-аура, вечный спринт.
+-- Цикл: cuff-аура, анти-стан, килл-аура (вампиризм/подброс).
 local auraAt = 0
-local punchAt = 0
 local cuffAt = 0
 local stunAt = 0
 local function auraTick()
@@ -1992,126 +1985,6 @@ local function auraTick()
                         if ch5 then
                             pcall(function() ev:FireServer(ch5) end)
                         end
-                    end
-                end
-            end
-        end
-    end
-
-    -- Возврат домой, когда punch-аура выключена.
-    if not CFG.PunchAura and CFG._punchHome then
-        local rootH = LP.Character
-            and LP.Character:FindFirstChild("HumanoidRootPart")
-        if rootH then
-            pcall(function() rootH.CFrame = CFG._punchHome end)
-            CFG._punchHome = nil
-        end
-    end
-
-    -- PUNCH-АУРА: FistEvent("Punch") — сервер сам бьёт того, кто
-    -- стоит рядом; кулаки экипируются автоматически.
-    if CFG.PunchAura
-       and now - punchAt >= (tonumber(CFG.PunchDelay) or 0.25) then
-        punchAt = now
-        local chrP = LP.Character
-        local humP = chrP and chrP:FindFirstChildOfClass("Humanoid")
-        local rootP = chrP and chrP:FindFirstChild("HumanoidRootPart")
-        if chrP and humP and rootP then
-            -- ДЕРЖИМ СЕБЯ НА НОГАХ: вражеский удар роняет в регдолл,
-            -- и аура стопорится. Поднимаемся и рвём регдолл-связи.
-            pcall(function()
-                local st = humP:GetState()
-                if st and (st.Name == "Physics" or st.Name == "Ragdoll"
-                    or st.Name == "FallingDown" or st.Name == "PlatformStanding") then
-                    humP:ChangeState(Enum.HumanoidStateType.GettingUp)
-                end
-                if humP.PlatformStand then humP.PlatformStand = false end
-                if (humP.WalkSpeed or 16) < 4 then humP.WalkSpeed = 16 end
-                if rootP.Anchored then rootP.Anchored = false end
-            end)
-            pcall(function()
-                for _, d in ipairs(chrP:GetDescendants()) do
-                    if d:IsA("BallSocketConstraint") or d:IsA("HingeConstraint") then
-                        d.Enabled = false
-                    end
-                end
-            end)
-            local fist, equipped = nil, false
-            for _, t in ipairs(chrP:GetChildren()) do
-                if t:IsA("Tool") and t:FindFirstChild("FistEvent") then
-                    fist, equipped = t, true
-                    break
-                end
-            end
-            if not fist then
-                local bp = LP:FindFirstChild("Backpack")
-                if bp then
-                    for _, t in ipairs(bp:GetChildren()) do
-                        if t:IsA("Tool") and t:FindFirstChild("FistEvent") then
-                            fist = t
-                            break
-                        end
-                    end
-                end
-            end
-            if fist then
-                if not equipped then
-                    pcall(function() humP:EquipTool(fist) end)
-                end
-                local ev = fist:FindFirstChild("FistEvent")
-                local bestR, bestD = nil, nil
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= LP then
-                        local ch3 = p.Character
-                        local h3 = ch3 and ch3:FindFirstChildOfClass("Humanoid")
-                        local r3 = ch3 and ch3:FindFirstChild("HumanoidRootPart")
-                        if ch3 and h3 and h3.Health > 0 and r3
-                           and targetAllowed(p, CFG.PunchTeam or "Everyone", LP.Team) then
-                            local d = (r3.Position - rootP.Position).Magnitude
-                            if not bestD or d < bestD then
-                                bestR, bestD = r3, d
-                            end
-                        end
-                    end
-                end
-                if not bestR and CFG._punchHome then
-                    -- Цели кончились — возвращаемся домой.
-                    local rootH2 = LP.Character
-                        and LP.Character:FindFirstChild("HumanoidRootPart")
-                    if rootH2 then
-                        pcall(function() rootH2.CFrame = CFG._punchHome end)
-                        CFG._punchHome = nil
-                    end
-                end
-                if bestR and ev and not CFG._punchBusy then
-                    if bestD <= 6 then
-                        -- Уже впритык — просто бьём.
-                        pcall(function() ev:FireServer("Punch") end)
-                    elseif CFG.PunchStay then
-                        -- РЕЖИМ «СТОЯТЬ У ЦЕЛИ»: телепорт один раз,
-                        -- дальше бьём без возвратов (сервер всегда видит
-                        -- нас рядом — попадания без промахов по таймингу).
-                        if not CFG._punchHome then
-                            CFG._punchHome = rootP.CFrame
-                        end
-                        CFG._punchBusy = true
-                        rootP.CFrame = bestR.CFrame * CFrame.new(0, 0, 1.2)
-                        task.wait(0.05)
-                        CFG._punchBusy = false
-                    elseif CFG.PunchTele then
-                        -- Телепорт → удар → возврат.
-                        CFG._punchBusy = true
-                        local orig = rootP.CFrame
-                        rootP.CFrame = bestR.CFrame * CFrame.new(0, 0, 1.2)
-                        task.wait(0.08)
-                        pcall(function() ev:FireServer("Punch") end)
-                        task.wait(0.08)
-                        local rootNow = LP.Character
-                            and LP.Character:FindFirstChild("HumanoidRootPart")
-                        if rootNow then
-                            pcall(function() rootNow.CFrame = orig end)
-                        end
-                        CFG._punchBusy = false
                     end
                 end
             end
@@ -2220,8 +2093,17 @@ local function auraTick()
                     local dir = Vector3.new(0, 0, 1)
                     local delta = root.Position - myRoot.Position
                     if delta.Magnitude > 0.01 then dir = delta.Unit end
+                    -- Подброс жертв — 5-й аргумент (отдача вверх),
+                    -- вампиризм — 6-й (лечит стрелка за каждый удар).
+                    local knock = 0
+                    if CFG.AuraFling then
+                        knock = 100000
+                        dir = Vector3.new(0, 1, 0)
+                    end
+                    local heal = 0
+                    if CFG.AuraLifesteal then heal = 1000000 end
                     pcall(function()
-                        remote:FireServer(hum, root, dmg, dir, 0, false, false)
+                        remote:FireServer(hum, root, dmg, dir, knock, heal, false)
                     end)
                 end
             end
@@ -2306,7 +2188,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.12",
+        LoadingSubtitle = "ESP + Combat v2.13",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -2567,7 +2449,10 @@ local okGUI, errGUI = pcall(function()
         Callback = function(selected)
             local picked = selected
             if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then CFG._target = picked end
+            if type(picked) == "string" then
+                CFG._target = picked
+                print("[PE] target = " .. picked)
+            end
         end,
     })
     targetPickers[#targetPickers + 1] = hitDrop
@@ -2615,6 +2500,20 @@ local okGUI, errGUI = pcall(function()
             if type(picked) == "string" then CFG.KillAuraTeam = picked end
         end,
     })
+    C:CreateToggle({ Name = "Lifesteal (heal self per hit)",
+        Flag = "PE_AuraLifesteal",
+        CurrentValue = CFG.AuraLifesteal ~= false,
+        Callback = function(v) CFG.AuraLifesteal = v end })
+    C:CreateToggle({ Name = "Fling targets (mega knockback up)",
+        Flag = "PE_AuraFling",
+        CurrentValue = CFG.AuraFling == true,
+        Callback = function(v) CFG.AuraFling = v end })
+    C:CreateButton({ Name = "Aura: ONLY selected player",
+        Callback = function()
+            CFG.KillAuraTeam = "Selected player"
+            print("[PE] kill aura -> ONLY: "
+                .. tostring(CFG._target or "none (pick one in a list)"))
+        end })
 
     C:CreateSection("Cuffs & teleport")
     C:CreateParagraph({ Title = "Cuffs & teleport",
@@ -2634,7 +2533,10 @@ local okGUI, errGUI = pcall(function()
         Callback = function(selected)
             local picked = selected
             if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then CFG._target = picked end
+            if type(picked) == "string" then
+                CFG._target = picked
+                print("[PE] target = " .. picked)
+            end
         end,
     })
     targetPickers[#targetPickers + 1] = cuffDrop
@@ -2675,43 +2577,11 @@ local okGUI, errGUI = pcall(function()
     C:CreateButton({ Name = "UPGRADE gun in hands",
         Callback = function() G.PE.ModGun() end })
 
-    C:CreateSection("Fists (Punch aura)")
-    C:CreateParagraph({ Title = "Punch aura",
-        Content = "The fist server only hits point blank. 'Stay at target' mode (on by default): teleport to the victim ONCE, stay close and punch with no round trips - no timing misses. Target died - teleport to the next one. Toggle off - you return home." })
-    C:CreateToggle({ Name = "Punch aura", Flag = "PE_PunchAura",
-        CurrentValue = CFG.PunchAura == true,
-        Callback = function(v) CFG.PunchAura = v end })
-    C:CreateSlider({ Name = "Punch delay", Flag = "PE_PunchDelay",
-        Range = {10, 100}, Increment = 5,
-        CurrentValue = math.clamp(
-            math.floor((tonumber(CFG.PunchDelay) or 0.25) * 100 + 0.5), 10, 100),
-        Suffix = " x10ms", Callback = function(v) CFG.PunchDelay = v / 100 end })
-    C:CreateToggle({ Name = "Stay at target (max speed)", Flag = "PE_PunchStay",
-        CurrentValue = CFG.PunchStay ~= false,
-        Callback = function(v) CFG.PunchStay = v end })
-    C:CreateToggle({ Name = "Hit far (fly+hit+return)", Flag = "PE_PunchTele",
-        CurrentValue = CFG.PunchTele ~= false,
-        Callback = function(v) CFG.PunchTele = v end })
-    C:CreateDropdown({
-        Name = "Who to punch",
-        Flag = "PE_PunchTeamPick",
-        Options = { "Everyone", "Except my team" },
-        CurrentOption = { CFG.PunchTeam },
-        MultipleOptions = false,
-        Callback = function(selected)
-            local picked = selected
-            if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then CFG.PunchTeam = picked end
-        end,
-    })
-
     C:CreateSection("Team & status")
     C:CreateButton({ Name = "Team: GUARD",
         Callback = function() G.PE.Team("Guard") end })
     C:CreateButton({ Name = "Team: PRISONER",
         Callback = function() G.PE.Team("Prisoner") end })
-    C:CreateButton({ Name = "Team: CRIMINAL",
-        Callback = function() G.PE.Team("Criminal") end })
     C:CreateButton({ Name = "Reset to menu (escape cuffs)",
         Callback = function() G.PE.ResetMenu() end })
 
@@ -2964,16 +2834,6 @@ G.PE_Stop = function()
     pcall(function() auraConn:Disconnect() end)
     pcall(function() paConn:Disconnect() end)
     pcall(function() prConn:Disconnect() end)
-    -- Возврат домой из punch-режима «стоять у цели».
-    if CFG._punchHome then
-        local rootH = LP.Character
-            and LP.Character:FindFirstChild("HumanoidRootPart")
-        if rootH then
-            pcall(function() rootH.CFrame = CFG._punchHome end)
-        end
-        CFG._punchHome = nil
-    end
-    CFG._punchBusy = false
     G.PE.Guns, G.PE.Remotes, G.PE.Probe, G.PE.TeamOf = nil, nil, nil, nil
     G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
     G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
@@ -2984,10 +2844,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.12 stopped")
+    print("[PE] v2.13 stopped")
 end
 
-print("[PE] v2.12 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.13 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
