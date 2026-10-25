@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.24
+--  PRISON ESP  v2.25
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -185,6 +185,10 @@ CFG.SilentTeam = pickOpt(CFG.SilentTeam, {
     "Everyone", "Except my team", "Only my team",
     "Enemies (guards vs prisoners)", "Only guards", "Only prisoners",
     "Selected player" }, "Enemies (guards vs prisoners)")
+-- БЕССМЕРТИЕ: цикл вампиризма БЕЗ жертвы — раз в 0.5с шлём
+-- InflictTarget по СЕБЕ: урон 0, вампиризм 1000000. Никого не
+-- задеваем, ни огня, ни пуль — сервер просто хилит нас.
+CFG.Immortal = CFG.Immortal == true
 
 local STOPPED = false
 local Rayfield
@@ -2330,6 +2334,7 @@ local taserAt = 0
 local stunAt = 0
 local modAt = 0
 local silentAt = 0
+local immortalAt = 0
 
 -- Зажатие ЛКМ для клиентского аима.
 local PE_MOUSE_DOWN = false
@@ -2525,6 +2530,25 @@ local function auraTick()
         elseif os.clock() - (CFG._noTaserWarnAt or 0) > 10 then
             CFG._noTaserWarnAt = os.clock()
             warn("[PE] taser aura: no Taser tool (switch to GUARD)")
+        end
+    end
+
+    -- БЕССМЕРТИЕ: вампиризм без жертвы — «выстрел» по самому себе,
+    -- урон 0, хил 1000000. Требует пушку с InflictTarget (как аура).
+    if CFG.Immortal and now - immortalAt >= 0.5 then
+        immortalAt = now
+        local chrI = LP.Character
+        local humI = chrI and chrI:FindFirstChildOfClass("Humanoid")
+        local rootI = chrI and chrI:FindFirstChild("HumanoidRootPart")
+        local remoteI = myGunRemote("InflictTarget")
+        if remoteI and humI and rootI then
+            pcall(function()
+                remoteI:FireServer(humI, rootI, 0,
+                    Vector3.new(0, 0, 1), 0, 1000000, false)
+            end)
+        elseif os.clock() - (CFG._noImmWarnAt or 0) > 10 then
+            CFG._noImmWarnAt = os.clock()
+            warn("[PE] immortal: no gun with InflictTarget - take a weapon")
         end
     end
 
@@ -2749,7 +2773,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.24",
+        LoadingSubtitle = "ESP + Combat v2.25",
         -- Сохранение настроек Rayfield выключено: оно требует writefile,
         -- которого может не быть в исполнителе; наши настройки и так
         -- живут в getgenv().PE.
@@ -3045,6 +3069,10 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_AuraBurn",
         CurrentValue = CFG.AuraBurn ~= false,
         Callback = function(v) CFG.AuraBurn = v end })
+    C:CreateToggle({ Name = "Immortality (self-heal loop, 0 dmg)",
+        Flag = "PE_Immortal",
+        CurrentValue = CFG.Immortal == true,
+        Callback = function(v) CFG.Immortal = v end })
     C:CreateButton({ Name = "Aura: ONLY selected player",
         Callback = function()
             CFG.KillAuraTeam = "Selected player"
@@ -3527,10 +3555,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.24 stopped")
+    print("[PE] v2.25 stopped")
 end
 
-print("[PE] v2.24 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.25 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
