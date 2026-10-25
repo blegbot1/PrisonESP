@@ -100,3 +100,72 @@ getgenv().PE.Remotes()
 ```
 
 Результат (консоль) → мне, дальше строим боевые функции.
+
+---
+
+# Обновление 2026-10-25: полный разбор через Studio MCP
+
+Через официальный Studio MCP (`StudioMCP.exe`, stdio JSON-RPC) подключились
+к Studio с открытым save.rbxlx (18.8 МБ, 13765 инстансов, 177 скриптов)
+и прочитали всё, что читается. Главный факт: **серверные скрипты в копии
+вычищены (Source = 0 байт)** — Item Give script, Doorscript, Health,
+Taser.Main, GunScript_Server, Cuff server. Клиентские — целые.
+
+## Подтверждено исходниками (включено в v2.13–v2.17)
+
+- **Весь урон считается в GunScript_Local (клиент)**: InflictTarget:FireServer(
+  Humanoid, Part, `Headshot and BaseDamage*HeadshotDamageMultiplier or BaseDamage`,
+  lookVector, Knockback, Lifesteal, FlamingBullet) — ВСЕ аргументы из
+  Setting-модуля, который мутается через require-кеш. Хедшот = попадание
+  в парт с именем «Head».
+- **Полный Setting-модуль** (M16a4 MOD): BaseDamage 6, HeadshotMultiplier 3,
+  ShotgunEnabled/BulletPerShot 8, BurstFire/BulletPerBurst 3/BurstRate,
+  ExplosiveEnabled/Radius (Explosion.Hit → InflictTarget ПО ВСЕМ в радиусе!),
+  Piercing, Knockback 3, Lifesteal 0, FlamingBullet, LimitedClipEnabled,
+  DelayBefore/AfterFiring, Spread, FireRate, ReloadTime.
+- **Тимфейндли-чек в ките мёртв**: `v1.Parent.TEAM.Value == TEAM.Value`,
+  но глобальный TEAM у игрока nil → проверка всегда пропускает.
+- **Тазер**: Taser.RemoteEvent:FireServer(ПОЗИЦИЯ) — один аргумент-вектор;
+  кулдаун 5 секунд только в LocalScript тулзы (флаг u20) → спам напрямую.
+- **Регдолл** (RagdollModule): Motor6D заменяются на BallSocketConstraint
+  (+ подмена RagdollAssets, CanCollide=false). Анти-стан правильный:
+  disable BallSocketConstraint + запрет состояний.
+
+## Мир (Workspace, 13765 инстансов)
+
+- **EscapePart** × 4+ — зоны побега заключённых (→ телепорт-кнопка).
+- **Death Part** × 9 (позиции сняты) — убивают на касание (Front Gate,
+  стены) → красная подсветка.
+- ServerStorage ПОЛНОСТЬЮ пуст. Машин нет (97 столовых стульев).
+- Villain-эффекты в ReplicatedStorage (Laser Eyes, Jet Flame, Speed Run,
+  Eye beam, Flame Parts, Speed Kick) — косметика SuperVillain-геймпасса,
+  клонируется на себя только клиентски (другие не видят) — отсеяно.
+
+## Отсеяное (проверено, не работает / бессмысленно)
+
+- **Админ-панель**: открывается клавишей `;` (Semicolon), команды текстом
+  в AdminCommandBarEvent («/unspectate», баны и т.д.), но сервер проверяет
+  права отправителя — молчание на все пробы.
+- **Магазин**: только MarketplaceService.PromptProductPurchase/
+  PromptGamePassPurchase — реальные деньги, халявы нет. GetShopInfo —
+  RemoteFunction, только читает каталог.
+- **Спринт**: SprintRemote:FireServer("StartRun"/"StopRun") — протокол
+  подтверждён, сервер режет скорость (вживую не работает).
+- **Объявления/спектейт/варны** (GlobalAnnouncement, PowerMessageEvent,
+  PrivateWarning, SpectateEvent, PrisonAnnouncementEvent): клиентские
+  слушатели OnClientEvent; FireServer с клиента — сервер игнорирует.
+- **GetBannedPlayers** (RemoteFunction): InvokeServer отдаёт список банов —
+  только информация.
+- **CuffUiClient**: при «HideHotbar» прячет рюкзак и разэкипирует тулзы —
+  чистый UI, на сервер не влияет.
+- **Анти-ТК «3 innocent kills»**: оказался просто слушателем уведомлений
+  (GameMessageRemote → SendNotification). Счётчик где-то на сервере.
+
+## Дебри GunScript_Local (на память)
+
+- При перезарядке клиент сам шлёт ChangeAmmoAndClip:FireServer(clip, total)
+  и при каждом выстреле тоже — это бухгалтерия магазина, «бесконечные
+  патроны» через прямой FireServer сервер не принял (проверено вживую).
+- VisualizeBullet:FireServer(...) — визуал трассеров для остальных; в ките
+  есть баг: передаётся Setting.BlastRadius, которого нет в модуле (nil).
+- Mouse Sensitivity / SniperEnabled — снайперский зум M16 (FOV 18).
