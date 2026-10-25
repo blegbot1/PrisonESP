@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.42
+--  PRISON ESP  v2.43
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -209,10 +209,18 @@ CFG.AntiAFK = CFG.AntiAFK ~= false
 -- ПРЫЖОК-БУСТ: физика своего персонажа на клиенте, JumpPower наш.
 CFG.JumpBoost = CFG.JumpBoost == true
 CFG.JumpPower = tonumber(CFG.JumpPower) or 90
+-- ПАКЕТ ДВИЖЕНИЯ: физика персонажа клиентская (доказано прыжком) —
+-- скорость/noclip/полёт честно реплицируются серверу позицией.
+CFG.SpeedHack = CFG.SpeedHack == true
+CFG.SpeedValue = tonumber(CFG.SpeedValue) or 40
+CFG.Noclip = CFG.Noclip == true
+CFG.Fly = CFG.Fly == true
+CFG.FlySpeed = tonumber(CFG.FlySpeed) or 60
 
 local STOPPED = false
 local Rayfield
-local mainConn, itemConn, auraConn, dangerConn, chamsConn
+local mainConn, itemConn, auraConn, dangerConn, chamsConn, flyConn
+local UIS = game:GetService("UserInputService")
 local by = {}          -- [Player] = {char, gui, lbl, box, role, vis, roleAt}
 
 -- ============================================================
@@ -2081,6 +2089,46 @@ end
 -- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
 -- ЗАМЕНА ТЕКСТУР удалена (v2.37) по запросу.
 
+-- ТОЧКИ ТЕЛЕПОРТА: живут в getgenv — переживают перезапуск скрипта.
+G.PE_Waypoints = G.PE_Waypoints or {}
+G.PE.WP_Save = function(name)
+    name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then
+        print("[PE WP] type a waypoint name first")
+        return
+    end
+    local root = LP.Character
+        and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    G.PE_Waypoints[name] = root.CFrame
+    local n = 0
+    for _ in pairs(G.PE_Waypoints) do n = n + 1 end
+    print("[PE WP] saved '" .. name .. "' (total " .. n .. ")")
+end
+G.PE.WP_TP = function(name)
+    local cf = G.PE_Waypoints[name]
+    local root = LP.Character
+        and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not cf or not root then
+        print("[PE WP] no such waypoint: " .. tostring(name))
+        return
+    end
+    root.CFrame = cf
+    print("[PE WP] teleported to '" .. tostring(name) .. "'")
+end
+-- ТП ПО ПРИЦЕЛУ: мгновенный перенос в точку, куда смотришь.
+G.PE.TPCrosshair = function()
+    local root = LP.Character
+        and LP.Character:FindFirstChild("HumanoidRootPart")
+    local hit = LP:GetMouse().Hit
+    if not root or not hit then
+        print("[PE TP] no character/target")
+        return
+    end
+    root.CFrame = CFrame.new(hit.Position + Vector3.new(0, 3, 0))
+    print("[PE TP] teleported to crosshair")
+end
+
 G.PE.ShopInfo = function()
     local f = ReplicatedStorage:FindFirstChild("ShopRemotes")
     local g = f and f:FindFirstChild("GetShopInfo")
@@ -2574,18 +2622,35 @@ local function auraTick()
         end
     end
 
-    -- ПРЫЖОК-БУСТ: JumpPower — часть физики нашего персонажа,
-    -- клиент её владелец. Держим применение раз в 0.25с.
-    if CFG.JumpBoost and now - jpAt >= 0.25 then
+    -- ПРЫЖОК-БУСТ + СКОРОСТЬ: физика нашего персонажа клиентская.
+    if now - jpAt >= 0.25 then
         jpAt = now
         local chrJ = LP.Character
         local humJ = chrJ and chrJ:FindFirstChildOfClass("Humanoid")
         if humJ then
             pcall(function()
-                humJ.UseJumpPower = true
-                humJ.JumpPower =
-                    math.clamp(tonumber(CFG.JumpPower) or 90, 50, 300)
+                if CFG.JumpBoost then
+                    humJ.UseJumpPower = true
+                    humJ.JumpPower =
+                        math.clamp(tonumber(CFG.JumpPower) or 90, 50, 300)
+                end
+                if CFG.SpeedHack then
+                    humJ.WalkSpeed =
+                        math.clamp(tonumber(CFG.SpeedValue) or 40, 16, 150)
+                end
             end)
+        end
+    end
+
+    -- NOCLIP: столкновения своих частей выкл (коллизии клиентские).
+    if CFG.Noclip and now - jpAt >= 0.25 then
+        local chrN = LP.Character
+        if chrN then
+            for _, p in ipairs(chrN:GetDescendants()) do
+                if p:IsA("BasePart") and p.CanCollide then
+                    pcall(function() p.CanCollide = false end)
+                end
+            end
         end
     end
 
@@ -2867,6 +2932,45 @@ auraConn = RunService.Heartbeat:Connect(function()
     end
 end)
 
+-- ПОЛЁТ: каждый Heartbeat задаём скорость от камеры (WASD +
+-- Space/Ctrl). Сервер видит только нашу позицию — физика клиентская.
+flyConn = RunService.Heartbeat:Connect(function()
+    if STOPPED or not CFG.Fly then return end
+    local chr = LP.Character
+    local root = chr and chr:FindFirstChild("HumanoidRootPart")
+    local hum = chr and chr:FindFirstChildOfClass("Humanoid")
+    if not root or not hum or hum.Health <= 0 then return end
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local move = Vector3.zero
+    if UIS:IsKeyDown(Enum.KeyCode.W) then
+        move = move + cam.CFrame.LookVector
+    end
+    if UIS:IsKeyDown(Enum.KeyCode.S) then
+        move = move - cam.CFrame.LookVector
+    end
+    if UIS:IsKeyDown(Enum.KeyCode.D) then
+        move = move + cam.CFrame.RightVector
+    end
+    if UIS:IsKeyDown(Enum.KeyCode.A) then
+        move = move - cam.CFrame.RightVector
+    end
+    if UIS:IsKeyDown(Enum.KeyCode.Space) then
+        move = move + Vector3.new(0, 1, 0)
+    end
+    if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
+        move = move - Vector3.new(0, 1, 0)
+    end
+    pcall(function()
+        if move.Magnitude > 0.01 then
+            root.AssemblyLinearVelocity = move.Unit
+                * math.clamp(tonumber(CFG.FlySpeed) or 60, 10, 300)
+        else
+            root.AssemblyLinearVelocity = Vector3.zero
+        end
+    end)
+end)
+
 -- СПИН-БОТ удалён (v2.37) по запросу: при выключении AutoRotate
 -- не возвращался и персонаж переставал поворачиваться.
 
@@ -2950,7 +3054,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.42",
+        LoadingSubtitle = "ESP + Combat v2.43",
         -- Сохранение настроек Rayfield: включаем только если в
         -- исполнителе есть файловая система (сам Rayfield проверит
         -- и предупредит, если нет). Наши дефолты живут в getgenv().
@@ -2982,10 +3086,17 @@ local okGUI, errGUI = pcall(function()
         ["Team & status"] = "Команда и статус",
         ["Movement"] = "Движение",
         ["Anti-AFK (no idle kick)"] = "Анти-АФК (не кикает за бездействие)",
+        ["Speed hack (WalkSpeed)"] = "Спидхак (WalkSpeed)",
+        ["Speed (studs/s)"] = "Скорость (стадов/с)",
+        ["Noclip (walk through walls)"] = "Ноклип (сквозь стены)",
+        ["Fly (WASD + Space/Ctrl)"] = "Полёт (WASD + Space/Ctrl)",
+        ["Fly speed"] = "Скорость полёта",
+        ["TP to crosshair (blink)"] = "ТП по прицелу (блинк)",
+        ["Waypoint name"] = "Имя точки",
+        ["SAVE waypoint (my position)"] = "СОХРАНИТЬ точку (моя позиция)",
+        ["Teleport to waypoint"] = "ТЕЛЕПОРТ к точке",
         ["Jump boost (higher jumps)"] = "Прыжок-буст (выше прыгаешь)",
         ["Jump power"] = "Сила прыжка",
-        ["Spinbot (spin yourself)"] = "Спин-бот (крутиться)",
-        ["Spin speed (deg/frame)"] = "Скорость вращения (град/кадр)",
         ["Switch team"] = "Сменить команду",
         ["Weapon giver (click detectors)"] = "Выдача оружия (клик-детекторы)",
         ["ESP guards"] = "ЕСП охраны", ["ESP prisoners"] = "ЕСП заключённых",
@@ -3567,6 +3678,67 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.FastRespawn = v end })
 
     C:CreateSection("Movement")
+    C:CreateToggle({ Name = "Speed hack (WalkSpeed)",
+        Flag = "PE_SpeedHack",
+        CurrentValue = CFG.SpeedHack == true,
+        Callback = function(v) CFG.SpeedHack = v end })
+    C:CreateSlider({ Name = "Speed (studs/s)", Flag = "PE_SpeedValue",
+        Range = {16, 150}, Increment = 2,
+        CurrentValue = math.clamp(tonumber(CFG.SpeedValue) or 40, 16, 150),
+        Callback = function(v) CFG.SpeedValue = v end })
+    C:CreateToggle({ Name = "Noclip (walk through walls)",
+        Flag = "PE_Noclip",
+        CurrentValue = CFG.Noclip == true,
+        Callback = function(v) CFG.Noclip = v end })
+    C:CreateToggle({ Name = "Fly (WASD + Space/Ctrl)",
+        Flag = "PE_Fly",
+        CurrentValue = CFG.Fly == true,
+        Callback = function(v) CFG.Fly = v end })
+    C:CreateSlider({ Name = "Fly speed", Flag = "PE_FlySpeed",
+        Range = {10, 300}, Increment = 10,
+        CurrentValue = math.clamp(tonumber(CFG.FlySpeed) or 60, 10, 300),
+        Callback = function(v) CFG.FlySpeed = v end })
+    C:CreateButton({ Name = "TP to crosshair (blink)",
+        Callback = function() G.PE.TPCrosshair() end })
+    C:CreateInput({ Name = "Waypoint name",
+        PlaceholderText = "e.g. armory",
+        CurrentValue = "",
+        Flag = "PE_WPName",
+        Callback = function(text) CFG._wpName = tostring(text) end })
+    C:CreateButton({ Name = "SAVE waypoint (my position)",
+        Callback = function() G.PE.WP_Save(CFG._wpName) end })
+    local wpDrop = C:CreateDropdown({
+        Name = "Teleport to waypoint",
+        Flag = "PE_WPPick",
+        Options = (function()
+            local o = {}
+            for nm in pairs(G.PE_Waypoints) do o[#o + 1] = nm end
+            table.sort(o)
+            if #o == 0 then o[1] = "(no waypoints)" end
+            return o
+        end)(),
+        CurrentOption = {},
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then
+                CFG._wp = picked
+                print("[PE WP] selected: " .. picked)
+            end
+        end,
+    })
+    C:CreateButton({ Name = "TELEPORT to waypoint",
+        Callback = function()
+            G.PE.WP_TP(CFG._wp)
+            pcall(function()
+                local o = {}
+                for nm in pairs(G.PE_Waypoints) do o[#o + 1] = nm end
+                table.sort(o)
+                if #o == 0 then o[1] = "(no waypoints)" end
+                wpDrop:Refresh(o)
+            end)
+        end })
     C:CreateToggle({ Name = "Anti-AFK (no idle kick)",
         Flag = "PE_AntiAFK",
         CurrentValue = CFG.AntiAFK ~= false,
@@ -3895,6 +4067,19 @@ G.PE_Stop = function()
     end)
     pcall(function() clickConn:Disconnect() end)
     pcall(function() auraConn:Disconnect() end)
+    pcall(function() flyConn:Disconnect() end)
+    pcall(function()
+        local chrS = LP.Character
+        local humS = chrS and chrS:FindFirstChildOfClass("Humanoid")
+        if humS then
+            humS.WalkSpeed = 16
+            if chrS then
+                for _, p in ipairs(chrS:GetDescendants()) do
+                    if p:IsA("BasePart") then p.CanCollide = true end
+                end
+            end
+        end
+    end)
     pcall(function() paConn:Disconnect() end)
     pcall(function() prConn:Disconnect() end)
     pcall(function() diedConn:Disconnect() end)
@@ -3908,16 +4093,17 @@ G.PE_Stop = function()
     G.PE.WearOutfit, G.PE.ShopInfo = nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     G.PE.FakeShot = nil
+    G.PE.WP_Save, G.PE.WP_TP, G.PE.TPCrosshair = nil, nil, nil
     local rfOld = Rayfield
     Rayfield = nil
     if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.42 stopped")
+    print("[PE] v2.43 stopped")
 end
 
-print("[PE] v2.42 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.43 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
