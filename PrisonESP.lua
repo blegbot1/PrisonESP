@@ -2185,6 +2185,33 @@ G.PE.Rearm = function()
     print("[PE ASH] re-arm: features may be enabled again")
 end
 
+-- v2.65: АВТОПОВТОР вместо кликов. Тумблеры сами крутят действие:
+-- гильотина каждые 1.5 с, воронка каждые 0.6 с, розыск каждые 3 с.
+CFG.AutoGuillotine = CFG.AutoGuillotine == true
+CFG.AutoVortex     = CFG.AutoVortex == true
+CFG.AutoWanted     = CFG.AutoWanted == true
+CFG.VortexMode     = CFG.VortexMode or "me"
+task.spawn(function()
+    while not STOPPED do
+        task.wait(0.6)
+        if not STOPPED and not CFG._panic then
+            local t = os.clock()
+            if CFG.AutoGuillotine and t - (CFG._gilAt or 0) > 1.5 then
+                CFG._gilAt = t
+                pcall(G.PE.Guillotine)
+            end
+            if CFG.AutoVortex and t - (CFG._vorAt or 0) > 0.6 then
+                CFG._vorAt = t
+                pcall(G.PE.Vortex, CFG.VortexMode)
+            end
+            if CFG.AutoWanted and t - (CFG._wanAt or 0) > 3 then
+                CFG._wanAt = t
+                pcall(G.PE.Wanted, true)
+            end
+        end
+    end
+end)
+
 -- МСТИТЕЛЬ: ТП к последнему атакующему + залп (10 тиков).
 G.PE.Revenge = function()
     local plr = CFG._lastAtk
@@ -4526,6 +4553,27 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.ApocDamage = v end })
 
     C:CreateSection("NEW: guillotine / vortex / wanted / thrones / ash")
+    C:CreateToggle({ Name = "AUTO-GUILLOTINE (push nearest into Death Part)",
+        Flag = "PE_AutoGuillotine",
+        CurrentValue = CFG.AutoGuillotine == true,
+        Callback = function(v) CFG.AutoGuillotine = v end })
+    C:CreateToggle({ Name = "AUTO-VORTEX (pull everyone continuously)",
+        Flag = "PE_AutoVortex",
+        CurrentValue = CFG.AutoVortex == true,
+        Callback = function(v) CFG.AutoVortex = v end })
+    C:CreateDropdown({ Name = "VORTEX point", Flag = "PE_VortexMode",
+        Options = { "me", "death", "escape" },
+        CurrentOption = { CFG.VortexMode },
+        MultipleOptions = false,
+        Callback = function(sel)
+            local picked = sel
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG.VortexMode = picked end
+        end })
+    C:CreateToggle({ Name = "AUTO-WANTED (clear my criminal status every 3s)",
+        Flag = "PE_AutoWanted",
+        CurrentValue = CFG.AutoWanted == true,
+        Callback = function(v) CFG.AutoWanted = v end })
     C:CreateButton({ Name = "GUILLOTINE: push target into Death Part",
         Callback = function() G.PE.Guillotine() end })
     C:CreateButton({ Name = "VORTEX: pull everyone TO ME",
