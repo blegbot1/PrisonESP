@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.72  (Combat-only: ESP вырезан по запросу)
+--  PRISON ESP  v2.73  (Combat-only: ESP вырезан, свой GUI PeUI)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -175,10 +175,10 @@ CFG.AuraMaxHits = tonumber(CFG.AuraMaxHits) or 6
 
 local STOPPED = false
 -- Боевые циклы не работают, пока меню не собрано: сохранённый конфиг
--- Rayfield восстанавливает тогглы колбэками, и без этого гейта аура/
--- полёт/апокалипсис взводились бы до появления окна.
+-- восстанавливает тогглы колбэками, и без этого гейта аура/полёт/
+-- апокалипсис взводились бы до появления окна.
 local PE_GUI_READY = false
-local Rayfield
+local PeUI
 local auraConn, flyConn, ijConn
 local UIS = game:GetService("UserInputService")
 
@@ -196,7 +196,7 @@ local paConn = Players.PlayerAdded:Connect(function(plr)
         warn("[PE] ADMIN ON SERVER: " .. plr.Name
             .. " (userId " .. plr.UserId .. ") - be careful!")
         pcall(function()
-            Rayfield:Notify({ Title = "ADMIN ON SERVER",
+            PeUI:Notify({ Title = "ADMIN ON SERVER",
                 Content = plr.Name .. " (userId " .. plr.UserId .. ")",
                 Duration = 10 })
         end)
@@ -2207,61 +2207,1023 @@ end)
 
 
 -- ============================================================
---  GUI (Rayfield)
+--  PE UI v1.0 — СОБСТВЕННЫЙ GUI (Rayfield больше не используется)
+--  Вкладки СВЕРХУ, фиолетово-чёрная мягкая тема, шрифт Nunito,
+--  плавные твины на всём. Ноль внешних загрузок: библиотека живёт
+--  прямо здесь, окно сразу в PlayerGui (клики работают всегда).
 -- ============================================================
--- Грузим с запасными URL: основной сайт бывает недоступен,
--- тогда молчаливый pcall съедал ошибку и меню просто не появлялось.
-local RF_URLS = {
-    -- Наша копия Rayfield: окно сразу создаётся в PlayerGui (патч),
-    -- а не в gethui-контейнере исполнителя, где клики не работают.
-    "https://raw.githubusercontent.com/blegbot1/PrisonESP/main/rayfield.lua",
-    "https://sirius.menu/rayfield",
-    "https://raw.githubusercontent.com/shlexware/Rayfield/main/source",
+PeUI = {
+    Flags = {},
+    _conns = {},
+    Translator = nil,
+    _destroyed = false,
 }
-local rfSource = nil   -- с какого URL загрузился Rayfield
-local rfMovedN = 0     -- сколько ScreenGui перенесено в PlayerGui
--- Аварийный флаг: getgenv().PE_SIMPLE = true ДО запуска скрипта —
--- Rayfield пропускается сразу, включается простое меню (если сам
--- Rayfield грузится, но кнопки в нём мёртвые).
-if G.PE_SIMPLE == true then
-    warn("[PE] PE_SIMPLE=true - Rayfield skipped")
-end
-if G.PE_SIMPLE ~= true then
-for _, u in ipairs(RF_URLS) do
-    local ok, res = pcall(function()
-        local src = game:HttpGet(u, true)
-        if type(src) ~= "string" or #src < 200 then error("empty response") end
-        local f = loadstring(src, "Rayfield")
-        if type(f) ~= "function" then error("loadstring returned nil") end
-        local lib = f()
-        if type(lib) ~= "table" then error("not a table: " .. typeof(lib)) end
-        return lib
-    end)
-    if ok and type(res) == "table" then
-        Rayfield = res
-        rfSource = u
-        break
-    end
-    warn("[PE] Rayfield failed to load (" .. u .. "): " .. tostring(res))
-end
-end -- PE_SIMPLE check
 
--- Снапшот UI-контейнера ДО создания окна Rayfield: после создания
--- перенесём его интерфейс в PlayerGui (см. rescueRayfield ниже).
-local rfContainer
-local rfBefore = {}
 do
-    local function getCont()
-        if typeof(gethui) == "function" then
-            local ok, h = pcall(gethui)
-            if ok and h and h.Parent then return h end
+    local TweenService = game:GetService("TweenService")
+    local HttpService = game:GetService("HttpService")
+
+    local THEME = {
+        Bg           = Color3.fromRGB(17, 11, 28),
+        Topbar       = Color3.fromRGB(25, 17, 41),
+        TabRow       = Color3.fromRGB(21, 14, 34),
+        TabIdle      = Color3.fromRGB(158, 132, 224),
+        TabActive    = Color3.fromRGB(212, 188, 255),
+        Accent       = Color3.fromRGB(167, 120, 255),
+        AccentSoft   = Color3.fromRGB(199, 164, 255),
+        Element      = Color3.fromRGB(27, 19, 44),
+        ElementHover = Color3.fromRGB(36, 26, 58),
+        Stroke       = Color3.fromRGB(54, 38, 88),
+        StrokeSoft   = Color3.fromRGB(40, 28, 66),
+        Text         = Color3.fromRGB(237, 230, 251),
+        TextDim      = Color3.fromRGB(170, 158, 200),
+        Off          = Color3.fromRGB(74, 58, 106),
+        InputBg      = Color3.fromRGB(22, 15, 36),
+        Popup        = Color3.fromRGB(24, 16, 40),
+    }
+    local FONT = Enum.Font.Nunito
+    local TT = 0.18
+
+    local function tr(s)
+        if type(s) == "string" and PeUI.Translator then
+            return PeUI.Translator(s)
         end
-        return CoreGui
+        return s
     end
-    rfContainer = getCont()
-    pcall(function()
-        for _, c in ipairs(rfContainer:GetChildren()) do rfBefore[c] = true end
-    end)
+
+    local function tween(inst, props, t)
+        local tw = TweenService:Create(inst,
+            TweenInfo.new(t or TT, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            props)
+        tw:Play()
+        return tw
+    end
+
+    local function mk(class, props, parent)
+        local inst = Instance.new(class)
+        if props then
+            for k, v in pairs(props) do inst[k] = v end
+        end
+        if parent then inst.Parent = parent end
+        return inst
+    end
+
+    local function corner(r, parent)
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, r)
+        c.Parent = parent
+        return c
+    end
+
+    local function stroke(col, th, parent)
+        local s = Instance.new("UIStroke")
+        s.Color = col
+        s.Thickness = th or 1
+        s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        s.Parent = parent
+        return s
+    end
+
+    local function pad(p, t, b, l, r)
+        local pa = Instance.new("UIPadding")
+        pa.PaddingTop = UDim.new(0, t or 0)
+        pa.PaddingBottom = UDim.new(0, b or 0)
+        pa.PaddingLeft = UDim.new(0, l or 0)
+        pa.PaddingRight = UDim.new(0, r or 0)
+        pa.Parent = p
+        return pa
+    end
+
+    local function keep(c)
+        PeUI._conns[#PeUI._conns + 1] = c
+        return c
+    end
+
+    local function safeCall(fn, ...)
+        if type(fn) ~= "function" then return end
+        local ok, err = pcall(fn, ...)
+        if not ok then
+            warn("[PE UI] callback: " .. tostring(err))
+        end
+    end
+
+    -- ---------- конфиг: writefile-персистентность флагов ----------
+    local cfgEnabled = false
+    local cfgPath = "PrisonESP/peui_config.json"
+    local cfgLoaded = false
+    local cfgQueued = false
+
+    local function dumpConfig()
+        if not cfgEnabled or not cfgLoaded then return end
+        local data = {}
+        for flag, el in pairs(PeUI.Flags) do
+            if el.Type == "Dropdown" then
+                data[flag] = el.CurrentOption[1]
+            else
+                data[flag] = el.CurrentValue
+            end
+        end
+        pcall(function()
+            writefile(cfgPath, HttpService:JSONEncode(data))
+        end)
+    end
+
+    local function queueSave()
+        if not cfgEnabled or not cfgLoaded or cfgQueued then return end
+        cfgQueued = true
+        task.delay(0.5, function()
+            cfgQueued = false
+            dumpConfig()
+        end)
+    end
+
+    -- ---------- уведомления: свой тост-стек справа сверху ----------
+    local notifyGui, notifyHolder
+
+    local function ensureNotifyGui()
+        if notifyGui and notifyGui.Parent then return end
+        notifyGui = Instance.new("ScreenGui")
+        notifyGui.Name = "PE_UI_Notify"
+        notifyGui.ResetOnSpawn = false
+        notifyGui.IgnoreGuiInset = true
+        notifyGui.DisplayOrder = 100001
+        local okN = pcall(function() notifyGui.Parent = CoreGui end)
+        if not okN or not notifyGui.Parent then
+            pcall(function()
+                notifyGui.Parent = LP:FindFirstChildOfClass("PlayerGui")
+                    or LP:WaitForChild("PlayerGui", 3)
+            end)
+        end
+        notifyHolder = mk("Frame", {
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(1, -14, 0, 14),
+            Size = UDim2.new(0, 290, 1, -28),
+            BackgroundTransparency = 1,
+        }, notifyGui)
+        mk("UIListLayout", {
+            Padding = UDim.new(0, 8),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            VerticalAlignment = Enum.VerticalAlignment.Top,
+        }, notifyHolder)
+    end
+
+    function PeUI:Notify(data)
+        if PeUI._destroyed then return end
+        ensureNotifyGui()
+        if not notifyGui or not notifyGui.Parent then return end
+        data = data or {}
+        local card = mk("Frame", {
+            BackgroundColor3 = THEME.Popup,
+            BorderSizePixel = 0,
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BackgroundTransparency = 1,
+        }, notifyHolder)
+        corner(10, card)
+        stroke(THEME.StrokeSoft, 1, card)
+        pad(card, 10, 10, 12, 12)
+        mk("UIListLayout", {
+            Padding = UDim.new(0, 4),
+            SortOrder = Enum.SortOrder.LayoutOrder,
+        }, card)
+        mk("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            Font = FONT,
+            TextSize = 15,
+            TextColor3 = THEME.AccentSoft,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Text = tr(tostring(data.Title or "Notify")),
+            LayoutOrder = 1,
+        }, card)
+        mk("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            Font = FONT,
+            TextSize = 13,
+            TextColor3 = THEME.TextDim,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Text = tr(tostring(data.Content or "")),
+            LayoutOrder = 2,
+        }, card)
+        tween(card, { BackgroundTransparency = 0 }, 0.22)
+        task.delay(math.clamp(tonumber(data.Duration) or 5, 1, 30), function()
+            if card.Parent then
+                tween(card, { BackgroundTransparency = 1 }, 0.3)
+                task.wait(0.32)
+                pcall(function() card:Destroy() end)
+            end
+        end)
+    end
+
+    -- ---------- окно ----------
+    function PeUI:CreateWindow(opts)
+        if PeUI._destroyed then return nil end
+        opts = opts or {}
+        local cs = opts.ConfigSaving
+        if cs and cs.Enabled and type(writefile) == "function"
+           and type(makefolder) == "function" then
+            cfgEnabled = true
+            cfgPath = tostring(cs.FolderName or "PrisonESP")
+                .. "/" .. tostring(cs.FileName or "config") .. "_peui.json"
+            pcall(function()
+                makefolder(tostring(cs.FolderName or "PrisonESP"))
+            end)
+        end
+
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "PE_UI"
+        sg.ResetOnSpawn = false
+        sg.IgnoreGuiInset = true
+        sg.DisplayOrder = 100000
+        pcall(function()
+            sg.Parent = LP:FindFirstChildOfClass("PlayerGui")
+                or LP:WaitForChild("PlayerGui", 3)
+        end)
+        if not sg.Parent then
+            pcall(function() sg.Parent = CoreGui end)
+        end
+        PeUI._sg = sg
+
+        local root = mk("Frame", {
+            Name = "Root",
+            Size = UDim2.new(0, 620, 0, 440),
+            Position = UDim2.new(0.5, -310, 0.5, -220),
+            BackgroundColor3 = THEME.Bg,
+            BorderSizePixel = 0,
+            Active = true,
+            ClipsDescendants = true,
+        }, sg)
+        corner(12, root)
+        stroke(THEME.Stroke, 1, root)
+
+        -- Топбар: заголовок + свернуть, им же таскаем окно.
+        local top = mk("Frame", {
+            Size = UDim2.new(1, 0, 0, 38),
+            BackgroundColor3 = THEME.Topbar,
+            BorderSizePixel = 0,
+            Active = true,
+        }, root)
+        corner(12, top)
+        mk("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 14, 0, 0),
+            Size = UDim2.new(1, -110, 1, 0),
+            Font = FONT,
+            TextSize = 16,
+            TextColor3 = THEME.Text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Text = tr(tostring(opts.Name or "PE UI")),
+        }, top)
+
+        local minBtn = mk("TextButton", {
+            AutoButtonColor = false,
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -10, 0.5, 0),
+            Size = UDim2.new(0, 26, 0, 26),
+            BackgroundColor3 = THEME.Element,
+            Font = FONT,
+            TextSize = 15,
+            TextColor3 = THEME.TextDim,
+            Text = "-",
+            BorderSizePixel = 0,
+        }, top)
+        corner(8, minBtn)
+
+        local expanded = true
+        keep(minBtn.MouseButton1Click:Connect(function()
+            expanded = not expanded
+            minBtn.Text = expanded and "-" or "+"
+            tween(root, { Size = expanded
+                and UDim2.new(0, 620, 0, 440)
+                or UDim2.new(0, 620, 0, 38) }, 0.25)
+        end))
+
+        -- Перетаскивание за топбар.
+        local dragging = false
+        local dragStart, startPos
+        keep(top.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1
+               or inp.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                dragStart = inp.Position
+                startPos = root.Position
+            end
+        end))
+        keep(UIS.InputChanged:Connect(function(inp)
+            if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement
+                or inp.UserInputType == Enum.UserInputType.Touch) then
+                local d = inp.Position - dragStart
+                root.Position = UDim2.new(startPos.X.Scale,
+                    startPos.X.Offset + d.X,
+                    startPos.Y.Scale, startPos.Y.Offset + d.Y)
+            end
+        end))
+        keep(UIS.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end))
+
+        -- K — показать/спрятать окно.
+        keep(UIS.InputBegan:Connect(function(inp, gp)
+            if gp then return end
+            if inp.KeyCode == Enum.KeyCode.K then
+                root.Visible = not root.Visible
+            end
+        end))
+
+        -- ВКЛАДКИ СВЕРХУ: горизонтальный ряд кнопок под топбаром.
+        local tabRow = mk("Frame", {
+            Position = UDim2.new(0, 0, 0, 38),
+            Size = UDim2.new(1, 0, 0, 42),
+            BackgroundColor3 = THEME.TabRow,
+            BorderSizePixel = 0,
+        }, root)
+        mk("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            Padding = UDim.new(0, 6),
+            HorizontalAlignment = Enum.HorizontalAlignment.Left,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+        }, tabRow)
+        pad(tabRow, 0, 0, 10, 10)
+
+        local content = mk("Frame", {
+            Position = UDim2.new(0, 0, 0, 80),
+            Size = UDim2.new(1, 0, 1, -80),
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            ClipsDescendants = true,
+        }, root)
+
+        local pages = {}
+        local activePopup = nil
+
+        local function closePopup()
+            if activePopup then
+                local p = activePopup
+                activePopup = nil
+                tween(p, { BackgroundTransparency = 1 }, 0.12)
+                task.delay(0.13, function()
+                    pcall(function() p:Destroy() end)
+                end)
+            end
+        end
+
+        local function inBounds(inst, x, y)
+            local p, s = inst.AbsolutePosition, inst.AbsoluteSize
+            return x >= p.X and x <= p.X + s.X and y >= p.Y and y <= p.Y + s.Y
+        end
+
+        keep(UIS.InputBegan:Connect(function(inp)
+            if activePopup and inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                local m = UIS:GetMouseLocation()
+                if not inBounds(activePopup, m.X, m.Y) then
+                    closePopup()
+                end
+            end
+        end))
+
+        local selectTab
+        selectTab = function(p)
+            closePopup()
+            for _, q in ipairs(pages) do
+                local on = (q == p)
+                q.frame.Visible = on
+                tween(q.btn, { BackgroundColor3 = on and THEME.Element
+                    or THEME.TabRow }, 0.15)
+                tween(q.btn, { TextColor3 = on and THEME.TabActive
+                    or THEME.TabIdle }, 0.15)
+                tween(q.bar, { BackgroundTransparency = on and 0 or 1 }, 0.15)
+            end
+        end
+
+        local win = { Tabs = {} }
+
+        function win:Tab(name)
+            local pageFrame = mk("ScrollingFrame", {
+                Visible = false,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Position = UDim2.new(0, 6, 0, 6),
+                Size = UDim2.new(1, -12, 1, -12),
+                CanvasSize = UDim2.new(0, 0, 0, 0),
+                AutomaticCanvasSize = Enum.AutomaticSize.Y,
+                ScrollingDirection = Enum.ScrollingDirection.Y,
+                ScrollBarThickness = 3,
+                ScrollBarImageColor3 = THEME.Accent,
+            }, content)
+            mk("UIListLayout", {
+                Padding = UDim.new(0, 6),
+                SortOrder = Enum.SortOrder.LayoutOrder,
+            }, pageFrame)
+            pad(pageFrame, 2, 6, 2, 6)
+
+            local btn = mk("TextButton", {
+                AutoButtonColor = false,
+                BackgroundColor3 = THEME.TabRow,
+                Size = UDim2.new(0, 0, 0, 28),
+                AutomaticSize = Enum.AutomaticSize.X,
+                Font = FONT,
+                TextSize = 14,
+                TextColor3 = THEME.TabIdle,
+                Text = tr(tostring(name)),
+                BorderSizePixel = 0,
+            }, tabRow)
+            corner(8, btn)
+            pad(btn, 0, 0, 12, 12)
+            local bar = mk("Frame", {
+                AnchorPoint = Vector2.new(0.5, 1),
+                Position = UDim2.new(0.5, 0, 1, -3),
+                Size = UDim2.new(1, -16, 0, 2),
+                BackgroundColor3 = THEME.Accent,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+            }, btn)
+            corner(1, bar)
+
+            local page = { frame = pageFrame, btn = btn, bar = bar }
+            pages[#pages + 1] = page
+            if #pages == 1 then
+                page.frame.Visible = true
+                btn.BackgroundColor3 = THEME.Element
+                btn.TextColor3 = THEME.TabActive
+                bar.BackgroundTransparency = 0
+            end
+            keep(btn.MouseButton1Click:Connect(function()
+                selectTab(page)
+            end))
+
+            local tabObj = {}
+            local order = 0
+            local function ord()
+                order = order + 1
+                return order
+            end
+
+            local function newRow(h)
+                local r = mk("TextButton", {
+                    AutoButtonColor = false,
+                    BackgroundColor3 = THEME.Element,
+                    Size = UDim2.new(1, 0, 0, h),
+                    Text = "",
+                    BorderSizePixel = 0,
+                    LayoutOrder = ord(),
+                }, pageFrame)
+                corner(9, r)
+                stroke(THEME.StrokeSoft, 1, r)
+                keep(r.MouseEnter:Connect(function()
+                    tween(r, { BackgroundColor3 = THEME.ElementHover }, 0.12)
+                end))
+                keep(r.MouseLeave:Connect(function()
+                    tween(r, { BackgroundColor3 = THEME.Element }, 0.12)
+                end))
+                return r
+            end
+
+            local function nameLabel(parent, w)
+                return mk("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 12, 0, 0),
+                    Size = UDim2.new(w or 1, -(w and (w * 24) or 24), 1, 0),
+                    Font = FONT,
+                    TextSize = 14,
+                    TextColor3 = THEME.Text,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                }, parent)
+            end
+
+            function tabObj:CreateSection(name)
+                local holder = mk("Frame", {
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, 26),
+                    LayoutOrder = ord(),
+                }, pageFrame)
+                mk("Frame", {
+                    BackgroundColor3 = THEME.Accent,
+                    BackgroundTransparency = 0.35,
+                    Position = UDim2.new(0, 2, 0.5, -8),
+                    Size = UDim2.new(0, 3, 0, 16),
+                    BorderSizePixel = 0,
+                }, holder)
+                mk("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 14, 0, 0),
+                    Size = UDim2.new(1, -20, 1, 0),
+                    Font = FONT,
+                    TextSize = 14,
+                    TextColor3 = THEME.AccentSoft,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Text = tr(tostring(name)),
+                }, holder)
+                return nil
+            end
+
+            function tabObj:CreateParagraph(data)
+                data = data or {}
+                local card = mk("Frame", {
+                    BackgroundColor3 = THEME.Element,
+                    BackgroundTransparency = 0.4,
+                    Size = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    BorderSizePixel = 0,
+                    LayoutOrder = ord(),
+                }, pageFrame)
+                corner(9, card)
+                stroke(THEME.StrokeSoft, 1, card)
+                pad(card, 8, 8, 12, 12)
+                mk("UIListLayout", {
+                    Padding = UDim.new(0, 3),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }, card)
+                mk("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    Font = FONT,
+                    TextSize = 14,
+                    TextColor3 = THEME.AccentSoft,
+                    TextWrapped = true,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Text = tr(tostring(data.Title or "")),
+                    LayoutOrder = 1,
+                }, card)
+                mk("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, 0, 0, 0),
+                    AutomaticSize = Enum.AutomaticSize.Y,
+                    Font = FONT,
+                    TextSize = 13,
+                    TextColor3 = THEME.TextDim,
+                    TextWrapped = true,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Text = tr(tostring(data.Content or "")),
+                    LayoutOrder = 2,
+                }, card)
+                return nil
+            end
+
+            function tabObj:CreateToggle(data)
+                data = data or {}
+                local r = newRow(34)
+                nameLabel(r, 0.6).Text = tr(tostring(data.Name or ""))
+                local pill = mk("Frame", {
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, -10, 0.5, 0),
+                    Size = UDim2.new(0, 38, 0, 20),
+                    BackgroundColor3 = data.CurrentValue and THEME.Accent
+                        or THEME.Off,
+                    BorderSizePixel = 0,
+                }, r)
+                corner(10, pill)
+                local knob = mk("Frame", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = data.CurrentValue
+                        and UDim2.new(1, -18, 0.5, 0)
+                        or UDim2.new(0, 2, 0.5, 0),
+                    Size = UDim2.new(0, 14, 0, 14),
+                    BackgroundColor3 = THEME.Text,
+                    BorderSizePixel = 0,
+                }, pill)
+                corner(7, knob)
+
+                local el = {
+                    Type = "Toggle",
+                    CurrentValue = data.CurrentValue and true or false,
+                }
+                el.Apply = function(v)
+                    el.CurrentValue = v and true or false
+                    tween(pill, { BackgroundColor3 = el.CurrentValue
+                        and THEME.Accent or THEME.Off }, 0.15)
+                    tween(knob, { Position = el.CurrentValue
+                        and UDim2.new(1, -18, 0.5, 0)
+                        or UDim2.new(0, 2, 0.5, 0) }, 0.18)
+                    safeCall(data.Callback, el.CurrentValue)
+                end
+                if data.Flag then PeUI.Flags[data.Flag] = el end
+                keep(r.MouseButton1Click:Connect(function()
+                    el.Apply(not el.CurrentValue)
+                    queueSave()
+                end))
+                return el
+            end
+
+            function tabObj:CreateSlider(data)
+                data = data or {}
+                local r = newRow(50)
+                local lo = tonumber(data.Range and data.Range[1]) or 0
+                local hi = tonumber(data.Range and data.Range[2]) or 100
+                if hi <= lo then hi = lo + 1 end
+                local inc = tonumber(data.Increment) or 1
+                local suffix = data.Suffix and (" " .. tostring(data.Suffix)) or ""
+                local function fmt(v)
+                    return tostring(math.floor(v * 100 + 0.5) / 100) .. suffix
+                end
+                local nl = mk("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 12, 0, 4),
+                    Size = UDim2.new(1, -120, 0, 18),
+                    Font = FONT,
+                    TextSize = 14,
+                    TextColor3 = THEME.Text,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    Text = tr(tostring(data.Name or "")),
+                }, r)
+                local val = mk("TextLabel", {
+                    AnchorPoint = Vector2.new(1, 0),
+                    Position = UDim2.new(1, -10, 0, 4),
+                    Size = UDim2.new(0, 100, 0, 18),
+                    BackgroundTransparency = 1,
+                    Font = FONT,
+                    TextSize = 13,
+                    TextColor3 = THEME.AccentSoft,
+                    TextXAlignment = Enum.TextXAlignment.Right,
+                    Text = fmt(tonumber(data.CurrentValue) or lo),
+                }, r)
+                local track = mk("Frame", {
+                    Position = UDim2.new(0, 12, 0, 30),
+                    Size = UDim2.new(1, -24, 0, 6),
+                    BackgroundColor3 = THEME.InputBg,
+                    BorderSizePixel = 0,
+                }, r)
+                corner(3, track)
+                local fill = mk("Frame", {
+                    Size = UDim2.new(0, 0, 1, 0),
+                    BackgroundColor3 = THEME.Accent,
+                    BorderSizePixel = 0,
+                }, track)
+                corner(3, fill)
+                local knobC = mk("Frame", {
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.new(0, 0, 0.5, 0),
+                    Size = UDim2.new(0, 12, 0, 12),
+                    BackgroundColor3 = THEME.Text,
+                    BorderSizePixel = 0,
+                    ZIndex = 2,
+                }, track)
+                corner(6, knobC)
+
+                local el = {
+                    Type = "Slider",
+                    CurrentValue = math.clamp(
+                        tonumber(data.CurrentValue) or lo, lo, hi),
+                }
+                local function paint()
+                    val.Text = fmt(el.CurrentValue)
+                    local f = (el.CurrentValue - lo) / (hi - lo)
+                    fill.Size = UDim2.new(f, 0, 1, 0)
+                    knobC.Position = UDim2.new(f, 0, 0.5, 0)
+                end
+                el.Apply = function(v)
+                    v = math.clamp(tonumber(v) or lo, lo, hi)
+                    v = math.floor(v / inc + 0.5) * inc
+                    el.CurrentValue = v
+                    paint()
+                    safeCall(data.Callback, v)
+                end
+                if data.Flag then PeUI.Flags[data.Flag] = el end
+                local function setFromX(x)
+                    local a = track.AbsolutePosition.X + 6
+                    local b = track.AbsolutePosition.X
+                        + track.AbsoluteSize.X - 6
+                    if b <= a then return end
+                    local a01 = math.clamp((x - a) / (b - a), 0, 1)
+                    local v = math.floor(
+                        (lo + a01 * (hi - lo)) / inc + 0.5) * inc
+                    v = math.clamp(v, lo, hi)
+                    if v ~= el.CurrentValue then
+                        el.CurrentValue = v
+                        paint()
+                        safeCall(data.Callback, v)
+                    end
+                end
+                do
+                    local f = (el.CurrentValue - lo) / (hi - lo)
+                    fill.Size = UDim2.new(f, 0, 1, 0)
+                    knobC.Position = UDim2.new(f, 0, 0.5, 0)
+                end
+                local dragS = false
+                keep(track.InputBegan:Connect(function(inp)
+                    if inp.UserInputType == Enum.UserInputType.MouseButton1
+                       or inp.UserInputType == Enum.UserInputType.Touch then
+                        dragS = true
+                        setFromX(inp.Position.X)
+                    end
+                end))
+                keep(UIS.InputChanged:Connect(function(inp)
+                    if dragS and (inp.UserInputType == Enum.UserInputType.MouseMovement
+                        or inp.UserInputType == Enum.UserInputType.Touch) then
+                        setFromX(inp.Position.X)
+                    end
+                end))
+                keep(UIS.InputEnded:Connect(function(inp)
+                    if inp.UserInputType == Enum.UserInputType.MouseButton1
+                       or inp.UserInputType == Enum.UserInputType.Touch then
+                        if dragS then
+                            dragS = false
+                            queueSave()
+                        end
+                    end
+                end))
+                return el
+            end
+
+            function tabObj:CreateDropdown(data)
+                data = data or {}
+                local r = newRow(34)
+                nameLabel(r, 0.55).Text = tr(tostring(data.Name or ""))
+                local sel = mk("TextLabel", {
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, -26, 0.5, 0),
+                    Size = UDim2.new(0, 190, 1, 0),
+                    BackgroundTransparency = 1,
+                    Font = FONT,
+                    TextSize = 13,
+                    TextColor3 = THEME.AccentSoft,
+                    TextXAlignment = Enum.TextXAlignment.Right,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    Text = "-",
+                }, r)
+                mk("TextLabel", {
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, -8, 0.5, 0),
+                    Size = UDim2.new(0, 16, 1, 0),
+                    BackgroundTransparency = 1,
+                    Font = FONT,
+                    TextSize = 12,
+                    TextColor3 = THEME.TextDim,
+                    Text = "v",
+                }, r)
+
+                local el = { Type = "Dropdown", CurrentOption = {}, Options = {} }
+                local optBtns = {}
+
+                local function refreshSelected()
+                    if #el.CurrentOption == 0 then
+                        sel.Text = "-"
+                    elseif #el.CurrentOption == 1 then
+                        sel.Text = tostring(el.CurrentOption[1])
+                    else
+                        sel.Text = "Various"
+                    end
+                    for o, b in pairs(optBtns) do
+                        local on = table.find(el.CurrentOption, o) ~= nil
+                        b.BackgroundColor3 = on and THEME.Accent
+                            or THEME.Element
+                        b.TextColor3 = on and THEME.Text or THEME.TextDim
+                    end
+                end
+
+                local popup = mk("ScrollingFrame", {
+                    Visible = false,
+                    BackgroundColor3 = THEME.Popup,
+                    BorderSizePixel = 0,
+                    Size = UDim2.new(0, 250, 0, 0),
+                    CanvasSize = UDim2.new(0, 0, 0, 0),
+                    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+                    ScrollingDirection = Enum.ScrollingDirection.Y,
+                    ScrollBarThickness = 3,
+                    ScrollBarImageColor3 = THEME.Accent,
+                    ZIndex = 60,
+                }, root)
+                corner(9, popup)
+                stroke(THEME.Stroke, 1, popup)
+                mk("UIListLayout", {
+                    Padding = UDim.new(0, 4),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }, popup)
+                pad(popup, 5, 5, 5, 5)
+
+                local function rebuild(opts)
+                    el.Options = opts or {}
+                    el.CurrentOption = {}
+                    for _, o in ipairs(data.CurrentOption or {}) do
+                        if table.find(el.Options, o) then
+                            el.CurrentOption[#el.CurrentOption + 1] = o
+                        end
+                    end
+                    if not data.MultipleOptions then
+                        el.CurrentOption = { el.CurrentOption[1] }
+                        if el.CurrentOption[1] == nil then
+                            el.CurrentOption = {}
+                        end
+                    end
+                    for _, b in ipairs(optBtns) do
+                        pcall(function() b:Destroy() end)
+                    end
+                    optBtns = {}
+                    for _, o in ipairs(el.Options) do
+                        local ob = mk("TextButton", {
+                            AutoButtonColor = false,
+                            BackgroundColor3 = THEME.Element,
+                            Size = UDim2.new(1, 0, 0, 26),
+                            Font = FONT,
+                            TextSize = 13,
+                            TextColor3 = THEME.TextDim,
+                            TextXAlignment = Enum.TextXAlignment.Left,
+                            Text = tostring(o),
+                            BorderSizePixel = 0,
+                            ZIndex = 61,
+                        }, popup)
+                        corner(7, ob)
+                        pad(ob, 0, 0, 8, 8)
+                        optBtns[o] = ob
+                        keep(ob.MouseButton1Click:Connect(function()
+                            if data.MultipleOptions then
+                                local i = table.find(el.CurrentOption, o)
+                                if i then
+                                    table.remove(el.CurrentOption, i)
+                                else
+                                    el.CurrentOption[#el.CurrentOption + 1] = o
+                                end
+                            else
+                                el.CurrentOption = { o }
+                                closePopup()
+                            end
+                            refreshSelected()
+                            safeCall(data.Callback, el.CurrentOption)
+                            queueSave()
+                        end))
+                    end
+                    popup.Size = UDim2.new(0, 250, 0,
+                        math.min(#el.Options * 30 + 10, 170))
+                    refreshSelected()
+                end
+
+                el.Apply = function(v)
+                    if type(v) == "table" then
+                        el.CurrentOption = v
+                    else
+                        el.CurrentOption = { v }
+                    end
+                    if not data.MultipleOptions then
+                        el.CurrentOption = { el.CurrentOption[1] }
+                        if el.CurrentOption[1] == nil then
+                            el.CurrentOption = {}
+                        end
+                    end
+                    refreshSelected()
+                    safeCall(data.Callback, el.CurrentOption)
+                end
+                -- Обновление списка игроков раз в 5с: выбор сохраняем,
+                -- если опция ещё существует (как чиненный Rayfield).
+                function el:Refresh(opts)
+                    data.CurrentOption = el.CurrentOption
+                    rebuild(opts or {})
+                end
+                if data.Flag then PeUI.Flags[data.Flag] = el end
+                rebuild(data.Options or {})
+
+                keep(r.MouseButton1Click:Connect(function()
+                    if activePopup == popup then
+                        closePopup()
+                        return
+                    end
+                    closePopup()
+                    popup.Position = UDim2.new(0,
+                        r.AbsolutePosition.X - root.AbsolutePosition.X
+                            + r.AbsoluteSize.X - 254,
+                        0,
+                        r.AbsolutePosition.Y - root.AbsolutePosition.Y
+                            + r.AbsoluteSize.Y + 4)
+                    popup.Visible = true
+                    popup.BackgroundTransparency = 1
+                    tween(popup, { BackgroundTransparency = 0 }, 0.12)
+                    activePopup = popup
+                end))
+                -- Клик мимо попапа и мимо строки — закрыть.
+                keep(UIS.InputBegan:Connect(function(inp)
+                    if activePopup == popup
+                       and inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                        local m = UIS:GetMouseLocation()
+                        if not inBounds(popup, m.X, m.Y)
+                           and not inBounds(r, m.X, m.Y) then
+                            closePopup()
+                        end
+                    end
+                end))
+                return el
+            end
+
+            function tabObj:CreateButton(data)
+                data = data or {}
+                local r = newRow(32)
+                r.Font = FONT
+                r.TextSize = 14
+                r.TextColor3 = THEME.Text
+                r.Text = tr(tostring(data.Name or ""))
+                keep(r.MouseButton1Click:Connect(function()
+                    tween(r, { BackgroundColor3 = THEME.Accent }, 0.1)
+                    task.delay(0.12, function()
+                        if r.Parent then
+                            tween(r, { BackgroundColor3 = THEME.Element }, 0.2)
+                        end
+                    end)
+                    safeCall(data.Callback)
+                end))
+                return nil
+            end
+
+            function tabObj:CreateInput(data)
+                data = data or {}
+                local r = newRow(34)
+                local nl = mk("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 12, 0, 0),
+                    Size = UDim2.new(0.45, -12, 1, 0),
+                    Font = FONT,
+                    TextSize = 14,
+                    TextColor3 = THEME.Text,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    Text = tr(tostring(data.Name or "")),
+                }, r)
+                local box = mk("TextBox", {
+                    AnchorPoint = Vector2.new(1, 0.5),
+                    Position = UDim2.new(1, -10, 0.5, 0),
+                    Size = UDim2.new(0, 240, 0, 24),
+                    BackgroundColor3 = THEME.InputBg,
+                    Font = FONT,
+                    TextSize = 13,
+                    TextColor3 = THEME.Text,
+                    PlaceholderColor3 = THEME.TextDim,
+                    PlaceholderText = tr(tostring(data.PlaceholderText or "")),
+                    Text = tostring(data.CurrentValue or ""),
+                    ClearTextOnFocus = false,
+                    BorderSizePixel = 0,
+                }, r)
+                corner(7, box)
+                pad(box, 0, 0, 8, 8)
+                local el = {
+                    Type = "Input",
+                    CurrentValue = tostring(data.CurrentValue or ""),
+                }
+                el.Apply = function(v)
+                    el.CurrentValue = tostring(v or "")
+                    box.Text = el.CurrentValue
+                    safeCall(data.Callback, el.CurrentValue)
+                end
+                if data.Flag then PeUI.Flags[data.Flag] = el end
+                keep(box.FocusLost:Connect(function(enter)
+                    el.CurrentValue = box.Text
+                    safeCall(data.Callback, box.Text)
+                    if enter then queueSave() end
+                end))
+                return el
+            end
+
+            return tabObj
+        end
+
+        function win:Destroy()
+            PeUI:Destroy()
+        end
+
+        -- Восстановление флагов из файла НЕ здесь: вкладки строятся
+        -- ПОСЛЕ CreateWindow, флагов ещё нет. ПеUI._loadConfig зовёт
+        -- PrisonESP после полной сборки меню.
+        PeUI._loadConfig = function()
+            if not cfgEnabled then return end
+            pcall(function()
+                if isfile and isfile(cfgPath) then
+                    local data = HttpService:JSONDecode(readfile(cfgPath))
+                    if type(data) == "table" then
+                        for flag, v in pairs(data) do
+                            local el = PeUI.Flags[flag]
+                            if el and el.Apply then el.Apply(v) end
+                        end
+                    end
+                end
+            end)
+            cfgLoaded = true
+        end
+
+        return win
+    end
+
+    function PeUI:Destroy()
+        if PeUI._destroyed then return end
+        PeUI._destroyed = true
+        for _, c in ipairs(PeUI._conns) do
+            pcall(function() c:Disconnect() end)
+        end
+        PeUI._conns = {}
+        if PeUI._sg then
+            pcall(function() PeUI._sg:Destroy() end)
+            PeUI._sg = nil
+        end
+        if notifyGui then
+            pcall(function() notifyGui:Destroy() end)
+            notifyGui = nil
+        end
+    end
 end
 
 -- Дропдауны выбора цели регистрируются здесь при сборке меню,
@@ -2281,50 +3243,11 @@ local function teamOpts()
 end
 local guiOK = false
 local okGUI, errGUI = pcall(function()
-    local W = Rayfield:CreateWindow({
-        Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
-                               -- CreateWindow умирает на полпути
-        LoadingTitle = "team c00lkidd",
-        LoadingSubtitle = "join the team  //  Combat v2.72",
-        -- C00LKIDD-тема: чёрное полотно, кроваво-красные акценты
-        -- (тема передаётся таблицей — ChangeTheme её принимает).
-        Theme = {
-            TextColor = Color3.fromRGB(255, 82, 82),
-            Background = Color3.fromRGB(10, 4, 4),
-            Topbar = Color3.fromRGB(26, 7, 7),
-            Shadow = Color3.fromRGB(4, 0, 0),
-            NotificationBackground = Color3.fromRGB(20, 5, 5),
-            NotificationActionsBackground = Color3.fromRGB(60, 10, 10),
-            TabBackground = Color3.fromRGB(34, 9, 9),
-            TabStroke = Color3.fromRGB(120, 0, 0),
-            TabBackgroundSelected = Color3.fromRGB(140, 0, 0),
-            TabTextColor = Color3.fromRGB(255, 120, 120),
-            SelectedTabTextColor = Color3.fromRGB(255, 230, 230),
-            ElementBackground = Color3.fromRGB(22, 6, 6),
-            ElementBackgroundHover = Color3.fromRGB(40, 10, 10),
-            SecondaryElementBackground = Color3.fromRGB(15, 4, 4),
-            ElementStroke = Color3.fromRGB(120, 10, 10),
-            SecondaryElementStroke = Color3.fromRGB(70, 6, 6),
-            SliderBackground = Color3.fromRGB(180, 0, 0),
-            SliderProgress = Color3.fromRGB(225, 0, 0),
-            SliderStroke = Color3.fromRGB(255, 40, 40),
-            ToggleBackground = Color3.fromRGB(20, 6, 6),
-            ToggleEnabled = Color3.fromRGB(200, 0, 0),
-            ToggleDisabled = Color3.fromRGB(90, 30, 30),
-            ToggleEnabledStroke = Color3.fromRGB(255, 50, 50),
-            ToggleDisabledStroke = Color3.fromRGB(110, 40, 40),
-            ToggleEnabledOuterStroke = Color3.fromRGB(120, 0, 0),
-            ToggleDisabledOuterStroke = Color3.fromRGB(60, 15, 15),
-            DropdownSelected = Color3.fromRGB(60, 8, 8),
-            DropdownUnselected = Color3.fromRGB(20, 5, 5),
-            InputBackground = Color3.fromRGB(18, 5, 5),
-            InputStroke = Color3.fromRGB(120, 10, 10),
-            PlaceholderColor = Color3.fromRGB(160, 90, 90),
-        },
-        -- Сохранение настроек Rayfield: включаем только если в
-        -- исполнителе есть файловая система (сам Rayfield проверит
-        -- и предупредит, если нет). Наши дефолты живут в getgenv().
-        ConfigurationSaving = {
+    local W = PeUI:CreateWindow({
+        Name = "PRISON ESP",
+        -- Сохранение настроек: свой формат peui_config.json (те же
+        -- флаги, свой JSON). Дефолты живут в getgenv().
+        ConfigSaving = {
             Enabled = type(writefile) == "function"
                 and type(makefolder) == "function",
             FolderName = "PrisonESP",
@@ -2423,53 +3346,16 @@ local okGUI, errGUI = pcall(function()
         ["UNLOAD script (full cleanup)"] = "ВЫГРУЗИТЬ скрипт (полная очистка)",
     }
     local function peTr(s)
-        if PE_RU[s] then return PE_RU[s] end
+        -- Переводим ТОЛЬКО в RU-режиме (PeUI зовёт Translator всегда).
+        if PE_LANG == "ru" and PE_RU[s] then return PE_RU[s] end
         return s
     end
+    -- Перевод подписей теперь внутри самой PeUI (мягкие колбэки под
+    -- pcall тоже там) — прокси-обёртки Rayfield больше не нужны.
+    PeUI.Translator = peTr
 
-    -- Каждый элемент в своём pcall: на части исполнителей один
-    -- неудачный Create* ронял ВСЮ сборку меню — окно оставалось
-    -- видимым, но в нём торчали мёртвые прототипы шаблона
-    -- (Toggle/Slider/Button без подключённых обработчиков).
-    local function safeTab(tabObj, tabName)
-        local proxy = {}
-        setmetatable(proxy, {
-            __index = function(_, k)
-                local v = tabObj[k]
-                if type(v) ~= "function" then return v end
-                return function(_, ...)
-                    local args = { ... }
-                    -- Переводим подписи на лету (только RU-режим).
-                    if PE_LANG == "ru" then
-                        if type(args[1]) == "table" then
-                            if type(args[1].Name) == "string" then
-                                args[1].Name = peTr(args[1].Name)
-                            end
-                            if type(args[1].Title) == "string" then
-                                args[1].Title = peTr(args[1].Title)
-                            end
-                        elseif type(args[1]) == "string" then
-                            args[1] = peTr(args[1])
-                        end
-                    end
-                    local ok, res = pcall(v, tabObj, unpack(args))
-                    if not ok then
-                        warn("[PE GUI] " .. tabName .. "." .. tostring(k)
-                            .. ": " .. tostring(res))
-                    end
-                    return res
-                end
-            end,
-        })
-        return proxy
-    end
     local function safeNewTab(Win, name, icon, label)
-        local okT, T0 = pcall(function() return Win:CreateTab(name, icon) end)
-        if not okT or not T0 then
-            warn("[PE GUI] CreateTab(" .. label .. "): " .. tostring(T0))
-            return nil
-        end
-        return safeTab(T0, label)
+        return Win:Tab(label or name)
     end
 
     -- ====================== ВКЛАДКА БОЙ ======================
@@ -2965,84 +3851,25 @@ local okGUI, errGUI = pcall(function()
             end })
         ST:CreateSection("Info")
         ST:CreateParagraph({ Title = "Version",
-            Content = "PRISON ESP v2.72 (Combat-only, ESP removed by request). Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "PRISON ESP v2.73 (Combat-only, ESP removed by request, built-in PeUI). Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
+    -- Флаги собраны — теперь можно восстановить сохранённый конфиг
+    -- (колбэки проставят CFG, гейт cfgLoaded не даст загрузке писать).
+    if PeUI and PeUI._loadConfig then pcall(PeUI._loadConfig) end
     PE_GUI_READY = true
 end)
 if not okGUI then
-    warn("[PE] RAYFIELD MENU BUILD FAILED: " .. tostring(errGUI))
-    -- Ломаное полусобранное окно убираем, чтобы не висло вместе
-    -- с простым меню (жалоба «два меню»).
+    warn("[PE] PE UI MENU BUILD FAILED: " .. tostring(errGUI))
+    -- Ломаное полусобранное окно убираем целиком.
     pcall(function()
-        if Rayfield and Rayfield.Destroy then Rayfield:Destroy() end
+        if PeUI then PeUI:Destroy() end
     end)
 end
 
--- ПОЧИНКА КЛИКОВ RAYFIELD: на части исполнителей его интерфейс лежит
--- в контейнере (gethui/CoreGui), который рисуется, но НЕ принимает
--- ввод. Переносим интерфейс в PlayerGui — там клики работают всегда.
-local function rescueRayfield()
-    if STOPPED then return end
-    if not Rayfield then return end
-    local pg = LP:FindFirstChildOfClass("PlayerGui")
-    if not pg then return end
-    local function tryMove(sg)
-        if not (sg and sg:IsA("ScreenGui")) then return false end
-        if sg.Parent == pg then return false end
-        local okM, errM = pcall(function()
-            sg.ResetOnSpawn = false
-            sg.DisplayOrder = 100000
-            sg.IgnoreGuiInset = true
-            sg.Parent = pg
-        end)
-        if okM then
-            rfMovedN = rfMovedN + 1
-            print("[PE] Rayfield ScreenGui '" .. sg.Name
-                .. "' MOVED to PlayerGui - clicks should work")
-            return true
-        end
-        warn("[PE] move '" .. sg.Name .. "' failed: " .. tostring(errM))
-        return false
-    end
-    -- 1) Точное имя: Rayfield создаёт ScreenGui с именем "Rayfield"
-    --    (DIAG показал: он лежит в gethui-контейнере).
-    for _, cont in ipairs({ rfContainer, CoreGui }) do
-        if cont and cont ~= pg then
-            pcall(function()
-                for _, c in ipairs(cont:GetChildren()) do
-                    if c:IsA("ScreenGui") and c.Name == "Rayfield" then
-                        tryMove(c)
-                    end
-                end
-            end)
-        end
-    end
-    -- 2) Запасной вариант: любые НОВЫЕ ScreenGui в контейнере
-    --    (если имя в другой версии библиотеки другое).
-    if rfMovedN == 0 and rfContainer and rfContainer ~= pg then
-        pcall(function()
-            for _, c in ipairs(rfContainer:GetChildren()) do
-                if not rfBefore[c] and c:IsA("ScreenGui") then
-                    tryMove(c)
-                end
-            end
-        end)
-    end
-end
-task.delay(0.2, rescueRayfield)
--- Долгий HttpGet: интерфейс мог появиться ПОСЛЕ статических проверок —
--- ловим появление ScreenGui до 15 с (наша копия сразу в PlayerGui —
--- выходим сразу, запасные URL кладут в gethui/CoreGui).
-task.spawn(function()
-    for _ = 1, 15 do
-        if STOPPED then break end
-        rescueRayfield()
-        if rfMovedN > 0 or rfSource == RF_URLS[1] then break end
-        task.wait(1)
-    end
-end)
+-- rescueRayfield удалён: PeUI сразу строит окно в PlayerGui с
+-- ResetOnSpawn=false — ни gethui, ни переноса, ни кликов-мёртвых.
 
 -- ============================================================
 --  ДИАГНОСТИКА: PE.Diag() + логгер каждого клика.
@@ -3055,9 +3882,9 @@ G.PE.Diag = function()
         end)
         print("[PE DIAG] executor: " .. (okEx and tostring(ex) or "?"))
     end
-    print("[PE DIAG] Rayfield=" .. tostring(Rayfield ~= nil)
-        .. " | source=" .. tostring(rfSource or "NOT loaded")
-        .. " | ScreenGui moved to PlayerGui=" .. tostring(rfMovedN))
+    print("[PE DIAG] UI=PeUI(built-in)"
+        .. " | window=" .. tostring(PeUI._sg ~= nil)
+        .. " | flags=" .. tostring(next(PeUI.Flags) ~= nil))
     do
         local hasGethui = typeof(gethui) == "function"
         print("[PE DIAG] gethui: " .. (hasGethui and "yes" or "NO"))
@@ -3145,12 +3972,10 @@ task.delay(3, function()
     if not STOPPED then G.PE.Diag() end
 end)
 
--- Простое меню УДАЛЕНО: только Rayfield. Если он не собрался —
+-- Меню — собственная PeUI (встроена в файл). Если сборка упала —
 -- громко ругаемся в консоль (функции доступны и без меню).
-if not Rayfield then
-    warn("[PE] Rayfield failed to load - no menu. Console: PE.Hit/PE.Team/PE.Give/PE.Doors etc.")
-elseif not guiOK then
-    warn("[PE] Rayfield menu failed to build (error above). Console: PE.Hit/PE.Team/PE.Give/PE.Doors etc.")
+if not guiOK then
+    warn("[PE] PE UI failed to build (error above). Console: PE.Hit/PE.Team/PE.Give/PE.Doors etc.")
 end
 
 -- ============================================================
@@ -3295,17 +4120,15 @@ G.PE_Stop = function()
             end
         end
     end)
-    local rfOld = Rayfield
-    Rayfield = nil
-    if rfOld then task.defer(function() pcall(function() rfOld:Destroy() end) end) end
+    local uiOld = PeUI
+    PeUI = nil
+    if uiOld then task.defer(function() pcall(function() uiOld:Destroy() end) end) end
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.72 stopped")
+    print("[PE] v2.73 stopped")
 end
 
-print("[PE] v2.72 started (Combat-only, ESP removed)"
-    .. " | Rayfield=" .. tostring(Rayfield ~= nil)
-    .. " | source=" .. tostring(rfSource or "NOT loaded")
+print("[PE] v2.73 started (Combat-only, ESP removed, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
