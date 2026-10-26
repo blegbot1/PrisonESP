@@ -2146,6 +2146,9 @@ G.PE.Give = function(itemName)
                    and (part.Position - root.Position).Magnitude > 60 then
                     root.CFrame = part.CFrame + Vector3.new(0, 4, 0)
                     teleported = true
+                    -- v2.57: метка для апокалипсиса — иначе Heartbeat вернёт
+                    -- нас на вышку через 16 мс, и клик уйдёт с 400 стадов.
+                    CFG._giveFlyAt = os.clock()
                     task.wait(0.12)
                 end
                 local ok = pcall(fireclickdetector, cd)
@@ -2213,6 +2216,15 @@ G.PE.EnsureWeapon = function(tag)
         CFG._ensureOk = true
         return true
     end
+    -- v2.57: для "GIVE ALL" быстрый выход по HasWeapon не работал → выдавали
+    -- 10 итемов каждые 4 с бесконечно (GiveAll сам длится 2.5-5 с).
+    if want == "GIVE ALL" then
+        local haveAll = true
+        for _, nm in ipairs(GIVE_ITEMS) do
+            if not G.PE.HasWeapon(nm) then haveAll = false break end
+        end
+        if haveAll then CFG._ensureOk = true return true end
+    end
     local nowE = os.clock()
     if CFG._ensureBusy or nowE - (CFG._ensureGiveAt or 0) < 4 then
         return false
@@ -2221,9 +2233,15 @@ G.PE.EnsureWeapon = function(tag)
     CFG._ensureBusy = true
     print("[PE GIVE] '" .. want .. "' NOT in inventory ("
         .. tostring(tag or "") .. ") - giving")
+    -- v2.57: тело в pcall — иначе ошибка (например UNLOAD во время GiveAll,
+    -- когда G.PE.Give уже nil) оставляла _ensureBusy=true НАВСЕГДА и глушила
+    -- авто-гивер до перезапуска игры.
     task.spawn(function()
-        if want == "GIVE ALL" then G.PE.GiveAll() else G.PE.Give(want) end
+        local okE, errE = pcall(function()
+            if want == "GIVE ALL" then G.PE.GiveAll() else G.PE.Give(want) end
+        end)
         CFG._ensureBusy = nil
+        if not okE then warn("[PE GIVE] ensure failed: " .. tostring(errE)) end
     end)
     return false
 end
@@ -2983,7 +3001,8 @@ local function auraTick()
             local perched = rootA.Anchored
                 and math.abs(rootA.Position.Y
                     - CFG._apocPerchCF.Position.Y) < 30
-            if not perched then
+            if not perched
+               and (os.clock() - (CFG._giveFlyAt or 0) > 0.6) then
                 pcall(function()
                     rootA.Anchored = true
                     rootA.CFrame = CFG._apocPerchCF
@@ -2999,8 +3018,11 @@ local function auraTick()
                 -- стоял на вышке и ничего не делал.
                 local want = G.PE.ApocGunName()
                 CFG._apocWant = want
+                -- v2.57: ИЛИ любая своя пушка с InflictTarget. Раньше требовалось
+                -- точное имя AutoGiveName, поэтому с AK/SVD в руках апокалипсис
+                -- навсегда считал себя безоружным и стоял на вышке.
                 CFG._apocHasGun = G.PE.HasWeapon(want)
-                    and myGunRemote("InflictTarget") ~= nil
+                    or myGunRemote("InflictTarget") ~= nil
             end
             local hasGun = CFG._apocHasGun
             if not hasGun then
@@ -3085,18 +3107,30 @@ local function auraTick()
     -- 350 стадов вверх, якоримся, лечимся вампиризмом, через 2.5 с назад.
     if CFG._immPerch and (not CFG.Immortal or now > (CFG._immUntil or 0)) then
         CFG._immPerch = nil
+        -- v2.57: возвращаем на точку ДО перча (раньше просто снимали якорь —
+        -- падение с +350), и ставим кулдаун, иначе в этом же тике HP всё
+        -- ещё <35% и перч ставился заново от уже высокой точки (набор высоты).
+        CFG._immCool = now + 1.5
         local rootR2 = LP.Character
             and LP.Character:FindFirstChild("HumanoidRootPart")
-        if rootR2 then pcall(function() rootR2.Anchored = false end) end
+        if rootR2 then
+            if CFG._immBack then
+                pcall(function() rootR2.CFrame = CFG._immBack end)
+            end
+            pcall(function() rootR2.Anchored = false end)
+        end
+        CFG._immBack = nil
         print("[PE IMM] perch released")
     end
-    if CFG.Immortal and not CFG._immPerch then
+    if CFG.Immortal and not CFG._immPerch
+       and now > (CFG._immCool or 0) then
         local chrP = LP.Character
         local humP = chrP and chrP:FindFirstChildOfClass("Humanoid")
         local rootP = chrP and chrP:FindFirstChild("HumanoidRootPart")
         if humP and rootP and humP.MaxHealth > 0
            and humP.Health / humP.MaxHealth < 0.35 then
             CFG._immPerch = rootP.CFrame + Vector3.new(0, 350, 0)
+            CFG._immBack = rootP.CFrame
             CFG._immUntil = now + 2.5
             pcall(function()
                 rootP.Anchored = true
