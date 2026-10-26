@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.76  (Combat-only: свой GUI PeUI, урон ауры ≤200)
+--  PRISON ESP  v2.77  (Combat-only: точная атрибуция атакующего)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1058,9 +1058,69 @@ local PE_LAST_HP = -1
 local PE_HIT_AT = 0
 local retTarget, retUntil = nil, 0
 
--- Поиск атакующего: кто вероятнее ударил/выстрелил — ближайший,
--- вооружённые получают приоритет (−30 стадов к счёту дистанции).
+-- КТО СТРЕЛЯЛ: сервер ретранслирует ВСЕ трассеры (VisualizeBullet)
+-- каждому клиенту. Слушаем их тихо (без отрисовки) и запоминаем,
+-- когда и кто стрелял — тогда атрибуция атакующего точная даже с
+-- дальней дистанции (старая эвристика «ближайший вооружённый» жгла
+-- невиновных рядом, пока дальний стрелок оставался цел).
+local recentShots = setmetatable({}, { __mode = "k" })
+local hookedVB = setmetatable({}, { __mode = "k" })
+local SHOT_MEMORY = 3 -- секунды
+
+local function hookShotRemotes()
+    if STOPPED then return end
+    for _, cont in ipairs({ workspace, ReplicatedStorage }) do
+        for _, d in ipairs(cont:GetDescendants()) do
+            if d:IsA("RemoteEvent") and d.Name == "VisualizeBullet"
+               and not hookedVB[d] then
+                hookedVB[d] = true
+                pcall(function()
+                    d.OnClientEvent:Connect(function(handle)
+                        if typeof(handle) ~= "Instance" then return end
+                        local tool = handle:FindFirstAncestorOfClass("Tool")
+                        local plr = tool
+                            and Players:GetPlayerFromCharacter(tool.Parent)
+                        if plr and plr ~= LP then
+                            recentShots[plr] = os.clock()
+                        end
+                    end)
+                end)
+            end
+        end
+    end
+end
+task.spawn(function()
+    while not STOPPED do
+        pcall(hookShotRemotes)
+        task.wait(2)
+    end
+end)
+
+-- Последний стрелок за окно памяти (или nil, если никто не стрелял).
+local function lastShooter()
+    local now = os.clock()
+    local bestP, bestT
+    for p, t in pairs(recentShots) do
+        if now - t > SHOT_MEMORY then
+            recentShots[p] = nil
+        elseif p.Parent and (not bestT or t > bestT) then
+            bestP, bestT = p, t
+        end
+    end
+    return bestP
+end
+
+-- Поиск атакующего: сначала точная атрибуция по недавним выстрелам,
+-- фолбэк — старая эвристика (ближайший, вооружённые −30 стадов).
 local function findAttacker(myRoot)
+    local shooter = lastShooter()
+    if shooter then
+        local ch = shooter.Character
+        local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then
+            return shooter
+        end
+    end
     local bestP, bestS
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LP then
@@ -1375,22 +1435,28 @@ local function auraTick()
                 end)
                 if damaged and now - immortalTapAt >= 0.3 then
                     immortalTapAt = now
-                    -- Ближайший живой враг без ForceField.
-                    local bestP2, bestD2
-                    for _, p3 in ipairs(Players:GetPlayers()) do
-                        if p3 ~= LP then
-                            local ch3 = p3.Character
-                            local h3 = ch3
-                                and ch3:FindFirstChildOfClass("Humanoid")
-                            local r3 = ch3
-                                and ch3:FindFirstChild("HumanoidRootPart")
-                            if ch3 and h3 and h3.Health > 0 and r3
-                               and not ch3:FindFirstChildOfClass("ForceField")
-                               and targetAllowed(p3, "Everyone", LP.Team) then
-                                local d3 = (r3.Position
-                                    - rootI.Position).Magnitude
-                                if not bestD2 or d3 < bestD2 then
-                                    bestP2, bestD2 = p3, d3
+                    -- Тап по источнику урона: сначала точный lastShooter
+                    -- (кто стрелял), фолбэк — ближайший живой враг.
+                    local bestP2 = lastShooter()
+                    if not (bestP2 and bestP2.Character
+                       and bestP2.Character:FindFirstChildOfClass("Humanoid")
+                       and bestP2.Character:FindFirstChildOfClass("Humanoid").Health > 0) then
+                        local bestD2
+                        for _, p3 in ipairs(Players:GetPlayers()) do
+                            if p3 ~= LP then
+                                local ch3 = p3.Character
+                                local h3 = ch3
+                                    and ch3:FindFirstChildOfClass("Humanoid")
+                                local r3 = ch3
+                                    and ch3:FindFirstChild("HumanoidRootPart")
+                                if ch3 and h3 and h3.Health > 0 and r3
+                                   and not ch3:FindFirstChildOfClass("ForceField")
+                                   and targetAllowed(p3, "Everyone", LP.Team) then
+                                    local d3 = (r3.Position
+                                        - rootI.Position).Magnitude
+                                    if not bestD2 or d3 < bestD2 then
+                                        bestP2, bestD2 = p3, d3
+                                    end
                                 end
                             end
                         end
@@ -3337,9 +3403,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.76 stopped")
+    print("[PE] v2.77 stopped")
 end
 
-print("[PE] v2.76 started (Combat-only, PeUI built-in)"
+print("[PE] v2.77 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
