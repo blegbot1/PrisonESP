@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.75  (Combat-only: свой GUI PeUI, упрощённый гивер)
+--  PRISON ESP  v2.76  (Combat-only: свой GUI PeUI, урон ауры ≤200)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -61,7 +61,7 @@ CFG.AntiStun = CFG.AntiStun ~= false
 -- Урон килл-ауры и бесконечные патроны. Подписура InflictTarget взята
 -- из декомпиляции GunScript_Local: (Humanoid, RootPart, урон,
 -- направление, отдача, вампиризм, поджог).
-CFG.KillAuraDamage = tonumber(CFG.KillAuraDamage) or 50
+CFG.KillAuraDamage = math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 200)
 CFG.ModGunDamage = tonumber(CFG.ModGunDamage) or 250
 -- ВАМПИРИЗМ АУРЫ: 6-й аргумент InflictTarget лечит стрелка на эту
 -- величину за каждый удар — псевдо-бессмертие, пока аура бьёт.
@@ -465,7 +465,7 @@ G.PE.Hit = function(namePart, partName)
         .. "). WATCH TARGET HP!")
     pcall(function()
         remote:FireServer(hum, root,
-            math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 5000),
+            math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 200),
             Vector3.new(0, 0, 1), 0, false, false)
     end)
 end
@@ -1119,7 +1119,7 @@ local function auraTick()
                 local burnR = (not bt or now - bt > 1.5)
                 if burnR then PE_BURN_AT[retTarget] = now end
                 local dmgR = math.clamp(
-                    tonumber(CFG.KillAuraDamage) or 50, 1, 5000)
+                    tonumber(CFG.KillAuraDamage) or 50, 1, 200)
                 pcall(function()
                     remoteR:FireServer(humA, headA, dmgR,
                         Vector3.new(0, 1, 0), 0, 0, burnR)
@@ -1528,7 +1528,7 @@ local function auraTick()
                     -- Урон зажат на месте использования: сохранённые
                     -- консолью/прошлой сессией значения не спамят сервер.
                     local dmg = math.clamp(
-                        tonumber(CFG.KillAuraDamage) or 50, 1, 5000)
+                        tonumber(CFG.KillAuraDamage) or 50, 1, 200)
                     local dir = Vector3.new(0, 0, 1)
                     local delta = root.Position - myRoot.Position
                     if delta.Magnitude > 0.01 then dir = delta.Unit end
@@ -2775,8 +2775,8 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = tonumber(CFG.KillAuraRadius) or 40,
         Suffix = " st", Callback = function(v) CFG.KillAuraRadius = v end })
     C:CreateSlider({ Name = "Damage per shot", Flag = "PE_KillAuraDamage",
-        Range = {1, 5000}, Increment = 10,
-        CurrentValue = math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 5000),
+        Range = {1, 200}, Increment = 5,
+        CurrentValue = math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 200),
         Callback = function(v) CFG.KillAuraDamage = v end })
     C:CreateSlider({ Name = "Tick delay", Flag = "PE_KillAuraDelay",
         Range = {10, 100}, Increment = 5,
@@ -3337,9 +3337,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.75 stopped")
+    print("[PE] v2.76 stopped")
 end
 
-print("[PE] v2.75 started (Combat-only, PeUI built-in)"
+print("[PE] v2.76 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
