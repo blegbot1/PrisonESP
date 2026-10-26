@@ -2132,6 +2132,31 @@ G.PE.Ash = function(mode)
         "OffArrows", "GroundRing", "Minimap", "Boxes", "MoveVec" }) do
         CFG[k] = false
     end
+    -- v2.63: паник-гейт в auraTick не пускает штатный откат, поэтому
+    -- откатываем движение ПРЯМО ЗДЕСЬ: иначе при админе бегаешь 150
+    -- и ходишь сквозь стены — ровно тот tell, от которого ASH спасает.
+    pcall(function()
+        local chr = LP.Character
+        local hum = chr and chr:FindFirstChildOfClass("Humanoid")
+        local root = chr and chr:FindFirstChild("HumanoidRootPart")
+        if hum then
+            hum.WalkSpeed = 16
+            hum.UseJumpPower = true
+            hum.JumpPower = 50
+            hum.Sit = false
+        end
+        if root then
+            root.Anchored = false
+            root.AssemblyLinearVelocity = Vector3.zero
+        end
+        if chr then
+            for _, p in ipairs(chr:GetDescendants()) do
+                if p:IsA("BasePart") and not p.CanCollide then
+                    pcall(function() p.CanCollide = true end)
+                end
+            end
+        end
+    end)
     CFG._throneHome = nil
     CFG._immBack = nil
     pcall(function()
