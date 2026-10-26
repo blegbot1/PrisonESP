@@ -2697,37 +2697,63 @@ local function auraTick()
         end
     end
 
-    -- ПРЫЖОК-БУСТ + СКОРОСТЬ: физика нашего персонажа клиентская.
-    local moveGate = now - jpAt >= 0.25
-    if moveGate then
-        jpAt = now
-        local chrJ = LP.Character
-        local humJ = chrJ and chrJ:FindFirstChildOfClass("Humanoid")
-        if humJ then
+    -- СКОРОСТЬ/ПРЫЖОК: применяем раз в 0.25с; при выключении тумблера
+    -- возвращаем Vanilla-значения ОДИН раз (флаг _moveWasOn).
+    local humJ = LP.Character
+        and LP.Character:FindFirstChildOfClass("Humanoid")
+    if humJ then
+        if CFG.SpeedHack or CFG.JumpBoost then
+            CFG._moveWasOn = true
+            if now - jpAt >= 0.25 then
+                jpAt = now
+                pcall(function()
+                    if CFG.JumpBoost then
+                        humJ.UseJumpPower = true
+                        humJ.JumpPower = math.clamp(
+                            tonumber(CFG.JumpPower) or 90, 50, 300)
+                    end
+                    if CFG.SpeedHack then
+                        humJ.WalkSpeed = math.clamp(
+                            tonumber(CFG.SpeedValue) or 40, 16, 150)
+                    end
+                end)
+            end
+        elseif CFG._moveWasOn then
+            -- Тумблеры выключили: сброс в ванилу, чтобы не «застревало».
+            CFG._moveWasOn = nil
             pcall(function()
-                if CFG.JumpBoost then
-                    humJ.UseJumpPower = true
-                    humJ.JumpPower =
-                        math.clamp(tonumber(CFG.JumpPower) or 90, 50, 300)
-                end
-                if CFG.SpeedHack then
-                    humJ.WalkSpeed =
-                        math.clamp(tonumber(CFG.SpeedValue) or 40, 16, 150)
-                end
+                humJ.WalkSpeed = 16
+                humJ.JumpPower = 50
+                humJ.UseJumpPower = true
             end)
+            print("[PE] speed/jump restored to default (16 / 50)")
         end
     end
 
-    -- NOCLIP: столкновения своих частей выкл (коллизии клиентские).
-    if CFG.Noclip and moveGate then
+    -- NOCLIP: движок возвращает CanCollide на частях каждый физ-шаг,
+    -- поэтому выключаем КАЖДЫЙ КАДР (а не раз в 0.25с) — иначе
+    -- «работает через раз». При выключении включаем коллизии обратно.
+    if CFG.Noclip then
         local chrN = LP.Character
         if chrN then
             for _, p in ipairs(chrN:GetDescendants()) do
                 if p:IsA("BasePart") and p.CanCollide then
-                    pcall(function() p.CanCollide = false end)
+                    p.CanCollide = false
                 end
             end
         end
+        CFG._noclipWasOn = true
+    elseif CFG._noclipWasOn then
+        CFG._noclipWasOn = nil
+        local chrN = LP.Character
+        if chrN then
+            for _, p in ipairs(chrN:GetDescendants()) do
+                if p:IsA("BasePart") and not p.CanCollide then
+                    pcall(function() p.CanCollide = true end)
+                end
+            end
+        end
+        print("[PE] noclip off - collisions restored")
     end
 
     -- C00LKIDD MODE: медленно сжигаем всех — крошечный урон каждый

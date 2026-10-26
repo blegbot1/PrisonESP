@@ -1,0 +1,15 @@
+===== Local Announcement system
+===== LocalServerAdminAnnouncements
+===== Local Shift to sprint 
+  if LocalPlayer:GetAttribute("SuperRunActive") or u28 then
+  u27.Visible = not LocalPlayer:GetAttribute("SuperRunActive")
+  if LocalPlayer:GetAttribute("SuperRunActive") then
+  if a1.KeyCode == Enum.KeyCode.LeftShift then
+  if LocalPlayer:GetAttribute("SuperRunActive") or u28 then
+  if a1.KeyCode == Enum.KeyCode.ButtonL3 then
+  if LocalPlayer:GetAttribute("SuperRunActive") or u28 then
+  if a1.KeyCode == Enum.KeyCode.LeftShift then
+  if a1.KeyCode == Enum.KeyCode.ButtonL3 then
+  ;(LocalPlayer:GetAttributeChangedSignal("SuperRunActive")):Connect(function() -- Line: 43 -- upvalues: u27 (ref), LocalPlayer (val), u28 (ref), u25 (val)
+  u27.Visible = not LocalPlayer:GetAttribute("SuperRunActive")
+  if LocalPlayer:GetAttribute("SuperRunActive") then
