@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.73  (Combat-only: ESP вырезан, свой GUI PeUI)
+--  PRISON ESP  v2.74  (Combat-only: свой GUI PeUI, ESP и NEW-фичи вырезаны)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -34,12 +34,6 @@ local LP               = Players.LocalPlayer
 -- ============================================================
 G.PE = G.PE or {}
 local CFG = G.PE
--- v2.62: паника — состояние ЭТОГО запуска. В getgenv она переживала
--- рестарт, и аура/движение молча умирали после каждого ASH.
-CFG._panic = nil
-CFG._wantedHooked = nil
-CFG._lastAtk = nil
-CFG._throneHome = nil
 CFG._ensureBusy = nil
 
 local function pickOpt(v, list, def)
@@ -50,10 +44,6 @@ local function pickOpt(v, list, def)
     end
     return def
 end
-
--- ПЕПЕЛ: паник-очистка, когда на сервер заходит админ.
-CFG.AshAuto       = CFG.AshAuto ~= false
-
 
 -- ---------- БОЕВЫЕ ----------
 CFG.KillAura       = CFG.KillAura == true
@@ -80,9 +70,6 @@ CFG.AuraLifesteal = CFG.AuraLifesteal ~= false
 CFG.AuraFling = CFG.AuraFling == true
 CFG.FlingDir = pickOpt(CFG.FlingDir, {
     "Up", "Away from me", "Random" }, "Up")
--- БЕСКОНЕЧНЫЙ РАДИУС: сервер не проверяет дистанцию InflictTarget
--- (доказано живым тестом c00lkidd-режима — горело по всему серверу).
-CFG.AuraInfRange = CFG.AuraInfRange == true
 -- ПОДЖОГ: 7-й аргумент InflictTarget (FlamingBullet) — серверный
 -- IgniteScript вешает на цель горение (урон по времени). Аура бьёт
 -- в голову (как настоящий хедшот).
@@ -104,9 +91,6 @@ CFG.GunLifesteal = CFG.GunLifesteal ~= false
 -- серверу ВНУТРИ честной перезарядки. Если сервер сверяет со своей
 -- копией Setting — пушка зависнет пустой (переложи её в руки).
 CFG.GunAmmoHack = CFG.GunAmmoHack == true
--- Снайперский прицел на ЛЮБОЙ пушке: Setting.SniperEnabled, зум
--- по клавише E (FieldOfView из Setting).
-CFG.GunScope = CFG.GunScope == true
 -- АВТО-ПРОКАЧКА: новая пушка в руках (респавн/смена) — апгрейд
 -- применяется сам, кнопку жать не надо.
 CFG.ModGunAuto = CFG.ModGunAuto ~= false
@@ -123,13 +107,6 @@ CFG.C00lDamage = tonumber(CFG.C00lDamage) or 3
 CFG.C00lFling = CFG.C00lFling == true
 CFG.C00lTeam = (type(CFG.C00lTeam) == "string"
     and CFG.C00lTeam ~= "") and CFG.C00lTeam or "Everyone"
--- ОГНЕННАЯ КИСТЬ: сервер вешает огонь на 2-й аргумент InflictTarget.
--- Если он не проверяет принадлежность части жертве — можно передать
--- блок стены/пола и РИСОВАТЬ ОГНЁМ курсором. Носитель урона —
--- ближайший враг (урон 1). Если сервер проверяет — огонь останется
--- на враге, просто не получится.
-CFG.FirePaint = CFG.FirePaint == true
-local paintAt = 0
 -- АПОКАЛИПСИС = УБИВАЛКА: один тумблер делает всё сам —
 -- 1) команда СБЕЖАВШИЙ, 2) сам берёт M9, 3) телепорт высоко в небо
 -- (не достанут; дистанции урона нет — доказано), 4) все игроки
@@ -139,9 +116,6 @@ local paintAt = 0
 CFG.Apocalypse = CFG.Apocalypse == true
 CFG.ApocDamage = tonumber(CFG.ApocDamage) or 100
 local apocAt = 0
--- МГНОВЕННЫЙ РЕВАЙН: умер — сами шлём ResetToMenuEvent и возвращаемся
--- в прошлую команду. Даунтайм ~1.5с вместо стандартного респавна.
-CFG.FastRespawn = CFG.FastRespawn == true
 -- АВТО-ГИВЕР: после смерти сам выдаёт выбранное оружие (если сервер
 -- ничего не выдал сам).
 CFG.AutoGive = CFG.AutoGive == true
@@ -162,8 +136,6 @@ CFG.JumpPower = tonumber(CFG.JumpPower) or 90
 CFG.SpeedHack = CFG.SpeedHack == true
 CFG.SpeedValue = tonumber(CFG.SpeedValue) or 40
 CFG.Noclip = CFG.Noclip == true
-CFG.Fly = CFG.Fly == true
-CFG.FlySpeed = tonumber(CFG.FlySpeed) or 60
 -- БЕСКОНЕЧНЫЙ ПРЫЖОК: JumpRequest → Jumping-состояние в воздухе.
 CFG.InfJump = CFG.InfJump == true
 -- FPS-БУСТ: минимальное качество рендера + без глобальных теней.
@@ -179,7 +151,7 @@ local STOPPED = false
 -- апокалипсис взводились бы до появления окна.
 local PE_GUI_READY = false
 local PeUI
-local auraConn, flyConn, ijConn
+local auraConn, ijConn
 local UIS = game:GetService("UserInputService")
 
 
@@ -188,8 +160,7 @@ local UIS = game:GetService("UserInputService")
 local PE_BURN_AT = setmetatable({}, { __mode = "k" })
 local PE_FLING_AT = setmetatable({}, { __mode = "k" })
 
--- ДЕТЕКТОР АДМИНОВ: вход известного админа/создателя — warn + алерт
--- (нужно для паники AshAuto и простой безопасности).
+-- ДЕТЕКТОР АДМИНОВ: вход известного админа/создателя — warn + алерт.
 local paConn = Players.PlayerAdded:Connect(function(plr)
     if STOPPED then return end
     if isAdminP(plr) then
@@ -223,17 +194,6 @@ local giveConn = LP.CharacterAdded:Connect(function()
             G.PE.EnsureWeapon("after respawn")
         end
     end)
-    -- Ghost переживает респавн: прозрачность частей после смерти
-    -- сбрасывается, включаем заново на новом персонаже.
-    if CFG._ghostOn then
-        task.spawn(function()
-            task.wait(1)
-            if not STOPPED and CFG._ghostOn
-               and type(G.PE.Ghost) == "function" then
-                G.PE.Ghost(true)
-            end
-        end)
-    end
 end)
 
 -- АНТИ-АФК: VirtualUser дёргает контроллер при idle-событии —
@@ -245,373 +205,6 @@ local afkConn = LP.Idled:Connect(function()
         vu:CaptureController()
         vu:ClickButton2(Vector2.new())
     end)
-end)
-
--- МГНОВЕННЫЙ РЕВАЙН: на смерть — сброс в меню и возврат в команду.
-local diedConn = LP.CharacterAdded:Connect(function(ch)
-    local humR = ch:WaitForChild("Humanoid", 10)
-    if humR then
-        humR.Died:Connect(function()
-            if STOPPED or not CFG.FastRespawn then return end
-            local team = LP.Team and LP.Team.Name
-            task.wait(0.3)
-            local r = ReplicatedStorage:FindFirstChild("ResetToMenuEvent")
-            if r then
-                pcall(function() r:FireServer() end)
-                print("[PE RESPAWN] instant rejoin (was " ..
-                    tostring(team) .. ")")
-            end
-            if team and team ~= "Undecided" then
-                task.wait(0.6)
-                local ct = ReplicatedStorage:FindFirstChild("ChooseTeamEvent")
-                if ct then
-                    pcall(function() ct:FireServer(team) end)
-                end
-            end
-        end)
-    end
-end)
-
--- ============================================================
---  НОВЫЕ ФИЧИ v2.59: гильотина, воронка, розыск, троны, пепел, мститель
--- ============================================================
-local function peChar(p)
-    local ch = p and p.Character
-    local hum = ch and ch:FindFirstChildOfClass("Humanoid")
-    local root = ch and ch:FindFirstChild("HumanoidRootPart")
-    return ch, hum, root
-end
-local function peNearestPart(nm, pos, maxD)
-    local best, bestD
-    for _, d in ipairs(workspace:GetDescendants()) do
-        if d:IsA("BasePart") and d.Name == nm then
-            local dd = (d.Position - pos).Magnitude
-            if dd <= (maxD or 400) and (not bestD or dd < bestD) then
-                best, bestD = d, dd
-            end
-        end
-    end
-    return best
-end
-local function pePickTarget()
-    local sel = CFG.KillAuraTeam
-    if type(sel) == "string" and sel ~= "" and sel ~= "Everyone" then
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LP and (p.Name == sel or p.DisplayName == sel) then
-                return p
-            end
-        end
-    end
-    local _, _, myRootP = peChar(LP)
-    local best, bestD
-    for _, p in ipairs(Players:GetPlayers()) do
-        local _, hum, root = peChar(p)
-        if p ~= LP and hum and hum.Health > 0 and root and myRootP then
-            local d = (root.Position - myRootP.Position).Magnitude
-            if not bestD or d < bestD then best, bestD = p, d end
-        end
-    end
-    return best
-end
-
--- ГИЛЬОТИНА: подброс + толчок в Death Part (смерть от карты, не от нас).
-G.PE.Guillotine = function(namePart)
-    local plr = namePart and findPlayer(tostring(namePart)) or pePickTarget()
-    local _, hum, root = peChar(plr)
-    if not (hum and root and hum.Health > 0) then
-        print("[PE GUILLOTINE] no live target")
-        return
-    end
-    local part = peNearestPart("Death Part", root.Position, 400)
-    local r = myGunRemote("InflictTarget")
-    if not part then print("[PE GUILLOTINE] no Death Part nearby") return end
-    if not r then print("[PE GUILLOTINE] no gun") return end
-    pcall(function()
-        r:FireServer(hum, root, 1, Vector3.new(0, 1, 0), 3500, 0, false)
-    end)
-    task.delay(0.25, function()
-        local _, hum2, root2 = peChar(plr)
-        if not (hum2 and root2) then return end
-        local dir = part.Position + Vector3.new(0, 1, 0) - root2.Position
-        if dir.Magnitude > 0.01 then dir = dir.Unit
-        else dir = Vector3.new(0, 1, 0) end
-        pcall(function()
-            r:FireServer(hum2, root2, 1, dir,
-                tonumber(CFG.DeathImpulse) or 8000, 0, false)
-        end)
-        print("[PE GUILLOTINE] " .. tostring(plr.Name) .. " -> Death Part")
-    end)
-end
-
--- ВОРОНКА: притянуть до 6 целей в точку (ко мне / Death / Escape).
-G.PE.Vortex = function(mode)
-    local _, _, myRootV = peChar(LP)
-    if not myRootV then return end
-    local point = myRootV.Position
-    if mode == "death" then
-        local d = peNearestPart("Death Part", myRootV.Position, 400)
-        if d then point = d.Position end
-    elseif mode == "escape" then
-        local e = peNearestPart("EscapePart", myRootV.Position, 2000)
-        if e then point = e.Position end
-    end
-    local r = myGunRemote("InflictTarget")
-    if not r then print("[PE VORTEX] no gun") return end
-    local n = 0
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP and n < 6 then
-            local _, hum, root = peChar(p)
-            if hum and hum.Health > 0 and root and not root.Anchored
-               and not hum.Sit
-               and (root.Position - point).Magnitude <= 60 then
-                local dir = point - root.Position
-                if dir.Magnitude > 2 then dir = dir.Unit
-                else dir = Vector3.new(0, 1, 0) end
-                pcall(function()
-                    r:FireServer(hum, root, 1, dir,
-                        tonumber(CFG.VortexImpulse) or 3000, 0, false)
-                end)
-                n = n + 1
-            end
-        end
-    end
-    print("[PE VORTEX] pulled " .. n)
-end
-
--- РОЗЫСК: зонд протокола CriminalStatusRemote + 4 варианта очистки/метки.
-G.PE.Wanted = function(clear, namePart)
-    local rem = ReplicatedStorage:FindFirstChild("CriminalStatusRemote", true)
-    if not rem then print("[PE WANTED] remote not found") return end
-    local target = clear and LP
-        or (namePart and findPlayer(tostring(namePart)) or pePickTarget())
-    if not target then print("[PE WANTED] no target") return end
-    if not CFG._wantedHooked then
-        CFG._wantedHooked = true
-        -- Коннект храним: PE_Stop его дисконнектит, иначе после выгрузки
-        -- принт живёт вечно, а ре-экзек добавляет ещё один.
-        CFG._wantedConn = rem.OnClientEvent:Connect(function(...)
-            print("[PE WANTED] <-", ...)
-        end)
-    end
-    local variants = clear
-        and { { false }, { 0 }, { target, false }, { target, 0 } }
-        or { { target, true }, { target.Name, true } }
-    task.spawn(function()
-        for _, args in ipairs(variants) do
-            pcall(function() rem:FireServer(table.unpack(args)) end)
-            task.wait(0.45)
-        end
-        print("[PE WANTED] sent " .. #variants .. " variants for " .. target.Name)
-    end)
-end
-
--- ТРОНЫ: невидимые Seat (Tr=1, CanCollide) как подставки в воздухе.
-local throneList, throneAt = {}, 0
-local function scanThrones()
-    throneList = {}
-    for _, d in ipairs(workspace:GetDescendants()) do
-        if d:IsA("Seat") and d.Transparency >= 1 and d.CanCollide
-           and d.Anchored and d.Position.Y > 3 then
-            throneList[#throneList + 1] = d
-        end
-    end
-    table.sort(throneList, function(a, b) return a.Position.Y > b.Position.Y end)
-end
-G.PE.Throne = function(mode)
-    local _, _, root = peChar(LP)
-    if not root then return end
-    if mode == "back" then
-        if CFG._throneHome then
-            root.CFrame = CFG._throneHome
-            CFG._throneHome = nil
-        end
-        return
-    end
-    if #throneList == 0 or os.clock() - throneAt > 30 then
-        throneAt = os.clock()
-        scanThrones()
-    end
-    if #throneList == 0 then
-        print("[PE THRONE] no invisible seats found")
-        return
-    end
-    local s
-    if mode == "top" then s = throneList[1]
-    elseif mode == "random" then s = throneList[math.random(1, #throneList)]
-    else
-        local bestD, best
-        for _, t in ipairs(throneList) do
-            local d = (t.Position - root.Position).Magnitude
-            if not bestD or d < bestD then bestD, best = d, t end
-        end
-        s = best
-    end
-    if not s then return end
-    CFG._throneHome = root.CFrame
-    root.CFrame = s.CFrame + Vector3.new(0, 3.5, 0)
-    print("[PE THRONE] Y=" .. math.floor(s.Position.Y)
-        .. " (" .. #throneList .. " seats)")
-end
-
-    -- ПЕПЕЛ: паник-очистка. Скрипт остаётся, но спит (CFG._panic).
-    G.PE.Ash = function(mode)
-        CFG._panic = true
-        -- Гасим только боевку/движение: при входе админа всё, что
-        -- могло бы его заинтересовать, выключается само.
-        for _, k in ipairs({ "KillAura", "Apocalypse", "C00lMode", "FirePaint",
-            "AutoGive", "Immortal", "AuraFling", "Retr", "GunFire",
-            "Noclip", "Fly", "InfJump", "SpeedHack", "JumpBoost",
-            "AntiStun", "ModGunAuto" }) do
-            CFG[k] = false
-        end
-    -- v2.63: паник-гейт в auraTick не пускает штатный откат, поэтому
-    -- откатываем движение ПРЯМО ЗДЕСЬ: иначе при админе бегаешь 150
-    -- и ходишь сквозь стены — ровно тот tell, от которого ASH спасает.
-    pcall(function()
-        local chr = LP.Character
-        local hum = chr and chr:FindFirstChildOfClass("Humanoid")
-        local root = chr and chr:FindFirstChild("HumanoidRootPart")
-        if hum then
-            hum.WalkSpeed = 16
-            hum.UseJumpPower = true
-            hum.JumpPower = 50
-            hum.Sit = false
-        end
-        if root then
-            root.Anchored = false
-            root.AssemblyLinearVelocity = Vector3.zero
-        end
-        if chr then
-            for _, p in ipairs(chr:GetDescendants()) do
-                if p:IsA("BasePart") and not p.CanCollide then
-                    pcall(function() p.CanCollide = true end)
-                end
-            end
-        end
-    end)
-    CFG._throneHome = nil
-    CFG._immBack = nil
-    if mode == "hard" then
-        local _, _, root = peChar(LP)
-        if root then
-            CFG._throneHome = nil
-            root.CFrame = CFrame.new(-347.7, -85.5, -535.1)
-        end
-    end
-    print("[PE ASH] panic " .. tostring(mode or "soft")
-        .. " - noisy features OFF (press RE-ARM to restore)")
-end
--- v2.66: НЕВИДИМОСТЬ (GHOST). Полной серверной инвизны в Roblox нет —
--- прозрачность идёт только локально. Поэтому: гасим себя на своём экране,
--- уводим тело в Lobby ПОД картой (там тебя никто не видит и не достанет
--- обычным огнём) и остаёмся на связи для ауры/чужого ремоута.
-G.PE.Ghost = function(on)
-    local chr = LP.Character
-    if not chr then print("[PE GHOST] no character") return end
-    local root = chr:FindFirstChild("HumanoidRootPart")
-    if on then
-        CFG._ghostOn = true
-        for _, p in ipairs(chr:GetDescendants()) do
-            if p:IsA("BasePart") then
-                pcall(function() p.LocalTransparencyModifier = 1 end)
-                pcall(function() p.Transparency = 1 end)
-            end
-        end
-        print("[PE GHOST] ON - you are see-through locally "
-            .. "(others still see you; AUTO-HOP is the cheater counter)")
-    else
-        CFG._ghostOn = nil
-        for _, p in ipairs(chr:GetDescendants()) do
-            if p:IsA("BasePart") then
-                pcall(function() p.LocalTransparencyModifier = 0 end)
-                pcall(function() p.Transparency = 0 end)
-            end
-        end
-        print("[PE GHOST] OFF - visible again")
-    end
-end
-
--- v2.67: ПОБЕГ ОТ ЧИТЕРА. Против InflictTarget без проверки дистанции
--- защиты нет (урон ставит сервер), поэтому единственный реальный выход —
--- уйти на другой сервер: телепорт уносит тебя туда, где читера нет.
-G.PE.ServerHop = function()
-    print("[PE HOP] leaving this server (anti-cheat escape)...")
-    local TS = game:GetService("TeleportService")
-    pcall(function() TS:Teleport(game.PlaceId, LP) end)
-end
-
-G.PE.Rearm = function()
-    CFG._panic = nil
-    print("[PE ASH] re-arm: features may be enabled again")
-end
-
--- v2.65: АВТОПОВТОР вместо кликов. Тумблеры сами крутят действие:
--- гильотина каждые 1.5 с, воронка каждые 0.6 с, розыск каждые 3 с.
-CFG.AutoGuillotine = CFG.AutoGuillotine == true
-CFG.AutoVortex     = CFG.AutoVortex == true
-CFG.AutoWanted     = CFG.AutoWanted == true
-CFG.VortexMode     = CFG.VortexMode or "me"
-task.spawn(function()
-    while not STOPPED do
-        task.wait(0.6)
-        if not STOPPED and not CFG._panic then
-            local t = os.clock()
-            if CFG.AutoGuillotine and t - (CFG._gilAt or 0) > 1.5 then
-                CFG._gilAt = t
-                pcall(G.PE.Guillotine)
-            end
-            if CFG.AutoVortex and t - (CFG._vorAt or 0) > 0.6 then
-                CFG._vorAt = t
-                pcall(G.PE.Vortex, CFG.VortexMode)
-            end
-            if CFG.AutoWanted and t - (CFG._wanAt or 0) > 3 then
-                CFG._wanAt = t
-                pcall(G.PE.Wanted, true)
-            end
-        end
-    end
-end)
-
--- МСТИТЕЛЬ: ТП к последнему атакующему + залп (10 тиков).
-G.PE.Revenge = function()
-    local plr = CFG._lastAtk
-    if not plr or not plr.Parent then
-        print("[PE REVENGE] no attacker recorded yet")
-        return
-    end
-    local _, hum, root = peChar(plr)
-    local _, _, myRootR = peChar(LP)
-    if not (hum and root and myRootR and hum.Health > 0) then return end
-    local r = myGunRemote("InflictTarget")
-    if not r then print("[PE REVENGE] no gun") return end
-    local home = myRootR.CFrame
-    pcall(function()
-        myRootR.CFrame = root.CFrame * CFrame.new(0, 0, 3)
-    end)
-    task.spawn(function()
-        for _ = 1, 10 do
-            local _, h2, r2 = peChar(plr)
-            if h2 and r2 and h2.Health > 0 then
-                pcall(function()
-                    r:FireServer(h2, r2,
-                        math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 5000),
-                        Vector3.new(0, 1, 0), 0, 0, false)
-                end)
-            end
-            task.wait(0.1)
-        end
-        local _, _, rBack = peChar(LP)
-        if rBack then pcall(function() rBack.CFrame = home end) end
-        print("[PE REVENGE] " .. tostring(plr.Name) .. " punished")
-    end)
-end
-
-Players.PlayerAdded:Connect(function(p)
-    if p ~= LP and CFG.AshAuto ~= false and not STOPPED and isAdminP(p) then
-        task.delay(0.5, function()
-            if not STOPPED then G.PE.Ash("soft") end
-        end)
-    end
 end)
 
 -- ============================================================
@@ -1221,17 +814,6 @@ G.PE.Doors = function()
     print("[PE DOORS] detectors clicked: " .. n)
 end
 
--- Сброс в меню: выход из наручников/ареста без смерти.
-G.PE.ResetMenu = function()
-    local r = ReplicatedStorage:FindFirstChild("ResetToMenuEvent")
-    if not r or not r:IsA("RemoteEvent") then
-        print("[PE MENU] ResetToMenuEvent not found")
-        return
-    end
-    print("[PE MENU] ResetToMenuEvent:FireServer()")
-    pcall(function() r:FireServer() end)
-end
-
 -- Ищем тул с нужным ремоутом/дочерним объектом: сначала экипированный.
 -- ВАЖНО: объявлен ДО G.PE.Cuff — иначе имя резолвится в глобал nil
 -- и кнопка наручников падает с "attempt to call a nil value".
@@ -1369,13 +951,6 @@ G.PE.ModGun = function(dmg)
         S.BulletPerBurst = math.min(S.BulletPerBurst, 3)
     end
     S.Lifesteal = CFG.GunLifesteal ~= false and 1000 or 0
-    -- Снайперский зум: E включает прицел (FOV из Setting.FieldOfView).
-    if CFG.GunScope then
-        S.SniperEnabled = true
-        if not tonumber(S.FieldOfView) or S.FieldOfView >= 70 then
-            S.FieldOfView = 18
-        end
-    end
     -- Патроны: следующая ЧЕСТНАЯ перезарядка унесёт серверу 1e9.
     if CFG.GunAmmoHack then
         S.AmmoPerClip = 1000000000
@@ -1525,9 +1100,6 @@ end
 
 local function auraTick()
     if not PE_GUI_READY then return end
-    -- v2.61: паника (ASH) глушит ВСЮ боевую петлю, а не только флаги в GUI:
-    -- иначе анти-стан, ноклип и аура продолжали работать при админе.
-    if CFG._panic then return end
     local now = os.clock()
 
     -- РЕТРИБУЦИЯ: нас ударили/подстрелили — вычисляем атакующего
@@ -1545,12 +1117,6 @@ local function auraTick()
                 if atk then
                     retTarget = atk
                     retUntil = now + 1.5
-                    CFG._lastAtk = atk
-                    if CFG.AutoHop
-                       and now - (CFG._hopAt or 0) > 25 then
-                        CFG._hopAt = now
-                        task.spawn(function() G.PE.ServerHop() end)
-                    end
                     print("[PE RET] attacker: " .. atk.Name .. " -> BURN")
                 end
             end
@@ -1709,51 +1275,6 @@ local function auraTick()
         elseif os.clock() - (CFG._noGunWarnAt or 0) > 10 then
             CFG._noGunWarnAt = os.clock()
             warn("[PE] c00lkidd: no gun with InflictTarget")
-        end
-    end
-
-    -- ОГНЕННАЯ КИСТЬ: часть под курсором + ближайший враг-носитель.
-    -- Каждые 0.35с обновляем огонь (Duration сервера конечен).
-    if CFG.FirePaint and now - paintAt >= 0.35 then
-        paintAt = now
-        local remoteP = myGunRemote("InflictTarget")
-        local mP = LP:GetMouse()
-        local partP = mP and mP.Target
-        if remoteP and partP and partP:IsA("BasePart")
-           and partP:IsDescendantOf(workspace) then
-            -- Носитель: ближайший живой враг (урон всего 1).
-            local rootP2 = LP.Character
-                and LP.Character:FindFirstChild("HumanoidRootPart")
-            local carrier, carrierD
-            for _, p2 in ipairs(Players:GetPlayers()) do
-                if p2 ~= LP then
-                    local ch2 = p2.Character
-                    local h2 = ch2 and ch2:FindFirstChildOfClass("Humanoid")
-                    local r2 = ch2 and ch2:FindFirstChild("HumanoidRootPart")
-                    if ch2 and h2 and h2.Health > 0 and r2
-                       and not ch2:FindFirstChildOfClass("ForceField")
-                       and not (LP.Character
-                           and r2:IsDescendantOf(LP.Character)) then
-                        -- Носитель: ближайший живой враг (урон всего 1).
-                        local d2 = rootP2
-                            and (r2.Position - rootP2.Position).Magnitude or 0
-                        if targetAllowed(p2,
-                               CFG.C00lTeam or "Everyone", LP.Team)
-                           and (not carrierD or d2 < carrierD) then
-                            carrier, carrierD = h2, d2
-                        end
-                    end
-                end
-            end
-            if carrier then
-                pcall(function()
-                    remoteP:FireServer(carrier, partP, 1,
-                        Vector3.new(0, 1, 0), 0, 0, true)
-                end)
-            elseif os.clock() - (CFG._noPaintWarnAt or 0) > 10 then
-                CFG._noPaintWarnAt = os.clock()
-                warn("[PE PAINT] no enemy alive to carry the fire")
-            end
         end
     end
 
@@ -2063,11 +1584,8 @@ local function auraTick()
                 -- дистанции; «Everyone» — все в радиусе.
                 local isSel = (mode ~= "Everyone" and mode ~= ""
                     and (p.Name == mode or p.DisplayName == mode))
-                -- Бесконечный радиус: сервер дистанцию InflictTarget
-                -- не проверяет (подтверждено c00lkidd-тестом).
-                local inRange = CFG.AuraInfRange
-                    or ((root.Position - myRoot.Position).Magnitude
-                        <= radius)
+                local inRange = (root.Position - myRoot.Position).Magnitude
+                    <= radius
                 local ok = isSel
                     or ((mode == "Everyone" or mode == "") and inRange)
                 if ok then
@@ -2076,9 +1594,6 @@ local function auraTick()
                     -- консолью/прошлой сессией значения не спамят сервер.
                     local dmg = math.clamp(
                         tonumber(CFG.KillAuraDamage) or 50, 1, 5000)
-                    -- v2.68: ИНСТА-КИЛЛ — максимальный урон и все цели,
-                    -- без слайдеров: люди падают с 1-2 пакетов.
-                    if CFG.InstaKill then dmg = 5000 end
                     local dir = Vector3.new(0, 0, 1)
                     local delta = root.Position - myRoot.Position
                     if delta.Magnitude > 0.01 then dir = delta.Unit end
@@ -2150,44 +1665,7 @@ auraConn = RunService.Heartbeat:Connect(function()
     end
 end)
 
--- ПОЛЁТ: каждый Heartbeat задаём скорость от камеры (WASD +
--- Space/Ctrl). Сервер видит только нашу позицию — физика клиентская.
-flyConn = RunService.Heartbeat:Connect(function()
-    if STOPPED or not PE_GUI_READY or not CFG.Fly then return end
-    local chr = LP.Character
-    local root = chr and chr:FindFirstChild("HumanoidRootPart")
-    local hum = chr and chr:FindFirstChildOfClass("Humanoid")
-    if not root or not hum or hum.Health <= 0 then return end
-    local cam = workspace.CurrentCamera
-    if not cam then return end
-    local move = Vector3.zero
-    if UIS:IsKeyDown(Enum.KeyCode.W) then
-        move = move + cam.CFrame.LookVector
-    end
-    if UIS:IsKeyDown(Enum.KeyCode.S) then
-        move = move - cam.CFrame.LookVector
-    end
-    if UIS:IsKeyDown(Enum.KeyCode.D) then
-        move = move + cam.CFrame.RightVector
-    end
-    if UIS:IsKeyDown(Enum.KeyCode.A) then
-        move = move - cam.CFrame.RightVector
-    end
-    if UIS:IsKeyDown(Enum.KeyCode.Space) then
-        move = move + Vector3.new(0, 1, 0)
-    end
-    if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
-        move = move - Vector3.new(0, 1, 0)
-    end
-    pcall(function()
-        if move.Magnitude > 0.01 then
-            root.AssemblyLinearVelocity = move.Unit
-                * math.clamp(tonumber(CFG.FlySpeed) or 60, 10, 300)
-        else
-            root.AssemblyLinearVelocity = Vector3.zero
-        end
-    end)
-end)
+-- ПОЛЁТ удалён (v2.74) по запросу.
 
 -- БЕСКОНЕЧНЫЙ ПРЫЖОК: каждый JumpRequest в воздухе перезапускает
 -- Jumping-состояние (физика наша — сервер видит только позицию).
@@ -3421,10 +2899,6 @@ local okGUI, errGUI = pcall(function()
             if type(picked) == "string" then CFG.FlingDir = picked end
         end,
     })
-    C:CreateToggle({ Name = "Infinite aura range (whole map)",
-        Flag = "PE_AuraInfRange",
-        CurrentValue = CFG.AuraInfRange == true,
-        Callback = function(v) CFG.AuraInfRange = v end })
     C:CreateToggle({ Name = "Burn targets (fire DOT)",
         Flag = "PE_AuraBurn",
         CurrentValue = CFG.AuraBurn ~= false,
@@ -3438,11 +2912,8 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.Immortal == true,
         Callback = function(v)
             CFG.Immortal = v
-            -- v2.55: смерть неизбежна (Health серверный) — не даём ей
-            -- стоить времени: мгновенный респавн + сторож оружия.
             if v then
-                CFG.FastRespawn = true
-                print("[PE IMM] panic-perch + fast respawn engaged")
+                print("[PE IMM] panic-perch engaged")
             end
         end })
 
@@ -3459,10 +2930,6 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_GunLifesteal",
         CurrentValue = CFG.GunLifesteal ~= false,
         Callback = function(v) CFG.GunLifesteal = v end })
-    C:CreateToggle({ Name = "Sniper scope on any gun (E key)",
-        Flag = "PE_GunScope",
-        CurrentValue = CFG.GunScope == true,
-        Callback = function(v) CFG.GunScope = v end })
     C:CreateToggle({ Name = "Ammo hack: 1e9 clip via real reload (test)",
         Flag = "PE_GunAmmoHack",
         CurrentValue = CFG.GunAmmoHack == true,
@@ -3541,10 +3008,6 @@ local okGUI, errGUI = pcall(function()
         end,
     })
     teamPickers[#teamPickers + 1] = burnDrop
-    C:CreateToggle({ Name = "Fire paint (draw with fire at cursor)",
-        Flag = "PE_FirePaint",
-        CurrentValue = CFG.FirePaint == true,
-        Callback = function(v) CFG.FirePaint = v end })
     C:CreateSection("APOCALYPSE (auto killer)")
     C:CreateParagraph({ Title = "Apocalypse",
         Content = "ONE toggle - the machine does everything: teleports you 400 studs UP and anchors (nobody reaches you), switches team Prisoner<->Escaped every second (everyone becomes a valid target in turn - server team-check bypassed), auto-takes the M9 pistol, then burns and deals 100 damage to EVERY player on the server every 0.5s. Toggle off - you are unanchored and lowered back." })
@@ -3565,78 +3028,6 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = math.clamp(tonumber(CFG.ApocDamage) or 100, 1, 200),
         Callback = function(v) CFG.ApocDamage = v end })
 
-    C:CreateSection("NEW: guillotine / vortex / wanted / thrones / ash")
-    C:CreateToggle({ Name = "INSTA-KILL: 5000 dmg to every target",
-        Flag = "PE_InstaKill",
-        CurrentValue = CFG.InstaKill == true,
-        Callback = function(v)
-            CFG.InstaKill = v
-            print("[PE] insta-kill " .. (v and "ON (5000 dmg)" or "OFF"))
-        end })
-    C:CreateToggle({ Name = "GHOST: invisible (park under the map)",
-        Flag = "PE_Ghost",
-        CurrentValue = false,
-        Callback = function(v) G.PE.Ghost(v) end })
-    C:CreateToggle({ Name = "AUTO-HOP: leave server when a cheater hits you",
-        Flag = "PE_AutoHop",
-        CurrentValue = CFG.AutoHop == true,
-        Callback = function(v)
-            CFG.AutoHop = v
-            print("[PE HOP] auto-hop " .. (v and "ON" or "OFF"))
-        end })
-    C:CreateButton({ Name = "HOP NOW (switch server)",
-        Callback = function() G.PE.ServerHop() end })
-    C:CreateToggle({ Name = "AUTO-GUILLOTINE (push nearest into Death Part)",
-        Flag = "PE_AutoGuillotine",
-        CurrentValue = CFG.AutoGuillotine == true,
-        Callback = function(v) CFG.AutoGuillotine = v end })
-    C:CreateToggle({ Name = "AUTO-VORTEX (pull everyone continuously)",
-        Flag = "PE_AutoVortex",
-        CurrentValue = CFG.AutoVortex == true,
-        Callback = function(v) CFG.AutoVortex = v end })
-    C:CreateDropdown({ Name = "VORTEX point", Flag = "PE_VortexMode",
-        Options = { "me", "death", "escape" },
-        CurrentOption = { CFG.VortexMode },
-        MultipleOptions = false,
-        Callback = function(sel)
-            local picked = sel
-            if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then CFG.VortexMode = picked end
-        end })
-    C:CreateToggle({ Name = "AUTO-WANTED (clear my criminal status every 3s)",
-        Flag = "PE_AutoWanted",
-        CurrentValue = CFG.AutoWanted == true,
-        Callback = function(v) CFG.AutoWanted = v end })
-    C:CreateButton({ Name = "GUILLOTINE: push target into Death Part",
-        Callback = function() G.PE.Guillotine() end })
-    C:CreateButton({ Name = "VORTEX: pull everyone TO ME",
-        Callback = function() G.PE.Vortex("me") end })
-    C:CreateButton({ Name = "VORTEX: pull into Death Part",
-        Callback = function() G.PE.Vortex("death") end })
-    C:CreateButton({ Name = "VORTEX: pull into Escape zone",
-        Callback = function() G.PE.Vortex("escape") end })
-    C:CreateButton({ Name = "WANTED: clear my criminal status",
-        Callback = function() G.PE.Wanted(true) end })
-    C:CreateButton({ Name = "WANTED: mark target as criminal",
-        Callback = function() G.PE.Wanted(false) end })
-    C:CreateButton({ Name = "THRONE: nearest invisible seat",
-        Callback = function() G.PE.Throne("near") end })
-    C:CreateButton({ Name = "THRONE: highest invisible seat",
-        Callback = function() G.PE.Throne("top") end })
-    C:CreateButton({ Name = "THRONE: back to ground",
-        Callback = function() G.PE.Throne("back") end })
-    C:CreateButton({ Name = "REVENGE: tp to last attacker + burst",
-        Callback = function() G.PE.Revenge() end })
-    C:CreateToggle({ Name = "ASH: auto-clean when admin joins",
-        Flag = "PE_AshAuto",
-        CurrentValue = CFG.AshAuto ~= false,
-        Callback = function(v) CFG.AshAuto = v end })
-    C:CreateButton({ Name = "ASH: panic clean NOW (soft)",
-        Callback = function() G.PE.Ash("soft") end })
-    C:CreateButton({ Name = "ASH: panic + hide in Lobby (hard)",
-        Callback = function() G.PE.Ash("hard") end })
-    C:CreateButton({ Name = "ASH: RE-ARM after panic",
-        Callback = function() G.PE.Rearm() end })
 
     C = safeNewTab(W, "Move", "activity", "Move")
     if not C then error("Move tab failed") end
@@ -3662,13 +3053,6 @@ local okGUI, errGUI = pcall(function()
             end
         end,
     })
-    C:CreateButton({ Name = "Reset to menu (escape cuffs)",
-        Callback = function() G.PE.ResetMenu() end })
-    C:CreateToggle({ Name = "Fast respawn (instant rejoin)",
-        Flag = "PE_FastRespawn",
-        CurrentValue = CFG.FastRespawn == true,
-        Callback = function(v) CFG.FastRespawn = v end })
-
     C:CreateSection("Movement")
     C:CreateToggle({ Name = "Speed hack (WalkSpeed)",
         Flag = "PE_SpeedHack",
@@ -3682,23 +3066,6 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_Noclip",
         CurrentValue = CFG.Noclip == true,
         Callback = function(v) CFG.Noclip = v end })
-    C:CreateToggle({ Name = "Fly (WASD + Space/Ctrl)",
-        Flag = "PE_Fly",
-        CurrentValue = CFG.Fly == true,
-        Callback = function(v)
-            CFG.Fly = v
-            if not v then
-                pcall(function()
-                    local r = LP.Character
-                        and LP.Character:FindFirstChild("HumanoidRootPart")
-                    if r then r.AssemblyLinearVelocity = Vector3.zero end
-                end)
-            end
-        end })
-    C:CreateSlider({ Name = "Fly speed", Flag = "PE_FlySpeed",
-        Range = {10, 300}, Increment = 10,
-        CurrentValue = math.clamp(tonumber(CFG.FlySpeed) or 60, 10, 300),
-        Callback = function(v) CFG.FlySpeed = v end })
     C:CreateToggle({ Name = "Infinite jump (jump in air)",
         Flag = "PE_InfJump",
         CurrentValue = CFG.InfJump == true,
@@ -3851,7 +3218,7 @@ local okGUI, errGUI = pcall(function()
             end })
         ST:CreateSection("Info")
         ST:CreateParagraph({ Title = "Version",
-            Content = "PRISON ESP v2.73 (Combat-only, ESP removed by request, built-in PeUI). Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "PRISON ESP v2.74 (Combat-only, built-in PeUI). Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
@@ -4030,7 +3397,6 @@ G.PE_Stop = function()
     STOPPED = true
     pcall(function() clickConn:Disconnect() end)
     pcall(function() auraConn:Disconnect() end)
-    pcall(function() flyConn:Disconnect() end)
     pcall(function() ijConn:Disconnect() end)
     pcall(function()
         local chrS = LP.Character
@@ -4070,31 +3436,18 @@ G.PE_Stop = function()
     end)
     pcall(function() paConn:Disconnect() end)
     pcall(function() prConn:Disconnect() end)
-    pcall(function() diedConn:Disconnect() end)
     pcall(function() giveConn:Disconnect() end)
     pcall(function() afkConn:Disconnect() end)
-    pcall(function()
-        if CFG._wantedConn then CFG._wantedConn:Disconnect() end
-    end)
-    CFG._wantedConn = nil
-    CFG._wantedHooked = nil
-    -- Ghost: снимаем локальную прозрачность при выгрузке.
-    if CFG._ghostOn and type(G.PE.Ghost) == "function" then
-        pcall(function() G.PE.Ghost(false) end)
-    end
-    CFG._ghostOn = nil
     G.PE.Guns, G.PE.Remotes, G.PE.Probe = nil, nil, nil
     G.PE.Hit, G.PE.Team, G.PE.Diag = nil, nil, nil
-    G.PE.Give, G.PE.GiveAll, G.PE.Doors, G.PE.ResetMenu = nil, nil, nil, nil
+    G.PE.Give, G.PE.GiveAll, G.PE.Doors = nil, nil, nil
     G.PE.Escape = nil
     G.PE.EscapeTrip = nil
     G.PE.WearOutfit, G.PE.ShopInfo = nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     G.PE.FakeShot = nil
     G.PE.WP_Save, G.PE.WP_TP, G.PE.TPCrosshair = nil, nil, nil
-    G.PE.Wanted, G.PE.Ghost, G.PE.Throne, G.PE.Revenge = nil, nil, nil, nil
-    G.PE.ServerHop, G.PE.Guillotine, G.PE.Vortex = nil, nil, nil
-    G.PE.Rearm, G.PE.EnsureWeapon, G.PE.HasWeapon = nil, nil, nil
+    G.PE.EnsureWeapon, G.PE.HasWeapon = nil, nil
     G.PE.ApocGunName = nil
     pcall(function()
         if CFG._immPerch then
@@ -4108,7 +3461,6 @@ G.PE_Stop = function()
         pcall(function() G.PE.FPSBoost(false) end)
     end
     G.PE.FPSBoost = nil
-    CFG._panic = nil
     CFG._ensureBusy = nil
     pcall(function()
         if CFG._apocPerchCF then
@@ -4126,9 +3478,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.73 stopped")
+    print("[PE] v2.74 stopped")
 end
 
-print("[PE] v2.73 started (Combat-only, ESP removed, PeUI built-in)"
+print("[PE] v2.74 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
