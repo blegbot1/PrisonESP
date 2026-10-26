@@ -2180,6 +2180,48 @@ G.PE.Ash = function(mode)
     print("[PE ASH] panic " .. tostring(mode or "soft")
         .. " - noisy features OFF (press RE-ARM to restore)")
 end
+-- v2.66: НЕВИДИМОСТЬ (GHOST). Полной серверной инвизны в Roblox нет —
+-- прозрачность идёт только локально. Поэтому: гасим себя на своём экране,
+-- уводим тело в Lobby ПОД картой (там тебя никто не видит и не достанет
+-- обычным огнём) и остаёмся на связи для ауры/чужого ремоута.
+G.PE.Ghost = function(on)
+    local chr = LP.Character
+    if not chr then print("[PE GHOST] no character") return end
+    local root = chr:FindFirstChild("HumanoidRootPart")
+    if on then
+        CFG._ghostHome = root and root.CFrame
+        CFG.Chams = false
+        for _, p in ipairs(chr:GetDescendants()) do
+            if p:IsA("BasePart") then
+                pcall(function() p.LocalTransparencyModifier = 1 end)
+                pcall(function() p.Transparency = 1 end)
+            end
+        end
+        if root then
+            pcall(function()
+                root.Anchored = true
+                root.CFrame = CFrame.new(-347.7, -85.5, -535.1)
+            end)
+        end
+        print("[PE GHOST] ON - invisible, parked in Lobby under the map")
+    else
+        for _, p in ipairs(chr:GetDescendants()) do
+            if p:IsA("BasePart") then
+                pcall(function() p.LocalTransparencyModifier = 0 end)
+                pcall(function() p.Transparency = 0 end)
+            end
+        end
+        if root then
+            if CFG._ghostHome then
+                pcall(function() root.CFrame = CFG._ghostHome end)
+            end
+            pcall(function() root.Anchored = false end)
+        end
+        CFG._ghostHome = nil
+        print("[PE GHOST] OFF - visible again")
+    end
+end
+
 G.PE.Rearm = function()
     CFG._panic = nil
     print("[PE ASH] re-arm: features may be enabled again")
@@ -4553,6 +4595,10 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.ApocDamage = v end })
 
     C:CreateSection("NEW: guillotine / vortex / wanted / thrones / ash")
+    C:CreateToggle({ Name = "GHOST: invisible (park under the map)",
+        Flag = "PE_Ghost",
+        CurrentValue = false,
+        Callback = function(v) G.PE.Ghost(v) end })
     C:CreateToggle({ Name = "AUTO-GUILLOTINE (push nearest into Death Part)",
         Flag = "PE_AutoGuillotine",
         CurrentValue = CFG.AutoGuillotine == true,
