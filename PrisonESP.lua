@@ -1879,7 +1879,10 @@ local function shotTracer(from, to, col)
     end
     local cam = workspace.CurrentCamera
     if not cam then return end
-    local a, b2 = vProj(cam, from), vProj(cam, to)
+    -- v2.60: vProj/roleColor объявлены ВНУТРИ do-блока VIS и снаружи
+    -- невидимы (nil) — звали их отсюда и получали "attempt to call a nil".
+    local a = cam:WorldToViewportPoint(from)
+    local b2 = cam:WorldToViewportPoint(to)
     if not a or not b2 or a.Z <= 0 or b2.Z <= 0 then return end
     local ln = t.ln
     ln.From = Vector2.new(a.X, a.Y)
@@ -1914,7 +1917,7 @@ local function hookShotRemotes()
                             and (handle.CFrame * CFrame.new(offV)).Position
                     end
                     muzzle = muzzle or hitPos
-                    local col = shooter and roleColor(roleOf(shooter))
+                    local col = VIS.roleColor(shooter and roleOf(shooter))
                         or Color3.fromRGB(255, 255, 255)
                     shotTracer(muzzle, hitPos, col)
                 end)
@@ -2308,7 +2311,7 @@ end
 --  ПРОБЫ В ОДИН КЛИК: урон / патроны / команда. Достаточно ЧАСТИ
 --  ника — точное имя игрока вводить не нужно.
 -- ============================================================
-local function findPlayer(namePart)
+function findPlayer(namePart)
     local part = string.lower(tostring(namePart or ""))
     if part == "" then return nil end
     local best, bestD
@@ -2330,7 +2333,7 @@ local function findPlayer(namePart)
     return best
 end
 
-local function myGunRemote(remoteName)
+function myGunRemote(remoteName)
     -- v2.53: кэш на 0.15 с. Раньше функция звалась до троттла в Retr и
     -- Immortal (по 60 раз/с каждая) и внутри ауры — 4-6 полных обходов
     -- toolList за тик (таблица + замыкание + 2 GetChildren на вызов).
