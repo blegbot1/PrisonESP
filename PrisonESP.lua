@@ -2016,14 +2016,27 @@ local function findPlayer(namePart)
 end
 
 local function myGunRemote(remoteName)
+    -- v2.53: кэш на 0.15 с. Раньше функция звалась до троттла в Retr и
+    -- Immortal (по 60 раз/с каждая) и внутри ауры — 4-6 полных обходов
+    -- toolList за тик (таблица + замыкание + 2 GetChildren на вызов).
+    local nowG = os.clock()
+    local c = CFG._gunCache
+    if c and c.n == remoteName and nowG - c.t < 0.15 then
+        return c.r, c.tl
+    end
+    local res, resTool = nil, nil
     for _, t in ipairs(toolList()) do
         local gs = t:FindFirstChild("GunScript_Server")
         if gs then
             local r = gs:FindFirstChild(remoteName)
-            if r and r:IsA("RemoteEvent") then return r, t end
+            if r and r:IsA("RemoteEvent") then
+                res, resTool = r, t
+                break
+            end
         end
     end
-    return nil
+    CFG._gunCache = { n = remoteName, t = nowG, r = res, tl = resTool }
+    return res, resTool
 end
 
 -- PE.Hit("часть ника") — выстрел урона по игроку через пушку в руках.
