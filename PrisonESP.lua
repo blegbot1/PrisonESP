@@ -2578,7 +2578,7 @@ G.PE.Give = function(itemName)
                 local part = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
                 local origCF = root and root.CFrame
                 local teleported = false
-                if root and part and origCF
+                if root and part and origCF and not CFG._giveNoFly
                    and (part.Position - root.Position).Magnitude > 60 then
                     root.CFrame = part.CFrame + Vector3.new(0, 4, 0)
                     teleported = true
@@ -2612,10 +2612,15 @@ end
 
 G.PE.GiveAll = function()
     local n = 0
+    -- v2.69: без флай-ина. Раньше GIVE ALL телепортировал к каждой модели
+    -- и обратно 10 раз подряд внутри колбэка Rayfield — после этого меню
+    -- переставало принимать клики (камера/фокус оставались в стене).
+    CFG._giveNoFly = true
     for _, nm in ipairs(GIVE_ITEMS) do
         if G.PE.Give(nm) then n = n + 1 end
         task.wait(0.25)
     end
+    CFG._giveNoFly = nil
     print("[PE GIVE] items given: " .. n)
 end
 
