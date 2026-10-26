@@ -36,6 +36,13 @@ local LP               = Players.LocalPlayer
 -- ============================================================
 G.PE = G.PE or {}
 local CFG = G.PE
+-- v2.62: паника — состояние ЭТОГО запуска. В getgenv она переживала
+-- рестарт, и аура/движение молча умирали после каждого ASH.
+CFG._panic = nil
+CFG._wantedHooked = nil
+CFG._lastAtk = nil
+CFG._throneHome = nil
+CFG._ensureBusy = nil
 
 local function safeColor(v, def)
     if typeof(v) == "Color3" then return v end
@@ -5056,6 +5063,8 @@ G.PE_Stop = function()
         pcall(function() G.PE.FPSBoost(false) end)
     end
     G.PE.FPSBoost = nil
+    CFG._panic = nil
+    CFG._ensureBusy = nil
     pcall(function()
         if CFG._apocPerchCF then
             CFG._apocPerchCF = nil
