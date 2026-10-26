@@ -2077,7 +2077,7 @@ local function scanThrones()
     throneList = {}
     for _, d in ipairs(workspace:GetDescendants()) do
         if d:IsA("Seat") and d.Transparency >= 1 and d.CanCollide
-           and d.Anchored and d.Position.Y > 15 then
+           and d.Anchored and d.Position.Y > 3 then
             throneList[#throneList + 1] = d
         end
     end
