@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.52
+--  PRISON ESP  v2.53
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -241,7 +241,9 @@ CFG.FlySpeed = tonumber(CFG.FlySpeed) or 60
 -- БЕСКОНЕЧНЫЙ ПРЫЖОК: JumpRequest → Jumping-состояние в воздухе.
 CFG.InfJump = CFG.InfJump == true
 -- FPS-БУСТ: минимальное качество рендера + без глобальных теней.
-CFG.FPSBoost = CFG.FPSBoost == true
+-- v2.53: флаг живёт под ОТДЕЛЬНЫМ ключом FPSBoostOn — ключ FPSBoost
+-- занят функцией G.PE.FPSBoost(on), раньше они затирали друг друга.
+CFG.FPSBoostOn = CFG.FPSBoostOn == true
 -- АУРА: максимум целей за тик (6 = дефолт, 20 = мясорубка).
 CFG.AuraMaxHits = tonumber(CFG.AuraMaxHits) or 6
 
@@ -849,7 +851,8 @@ function VIS.update(cam, myRoot)
             if hum and head and hum.Health > 0 then
                 local sp = vProj(cam, head.Position + Vector3.new(0, 0.5, 0))
                 if sp and sp.Z > 0 then
-                    local maxHp = hum.MaxHealth or 100
+                    local maxHp = tonumber(hum.MaxHealth) or 100
+                    if maxHp <= 0 then maxHp = 100 end
                     local hpPct = math.clamp(hum.Health / maxHp, 0, 1)
                     local cur = hpSmooth[tPlr]
                     if cur == nil then
@@ -1316,11 +1319,6 @@ local function removePlayer(plr)
     by[plr] = nil
     PE_BURN_AT[plr] = nil
     PE_FLING_AT[plr] = nil
-    -- v2.52: сглаживание HP живёт по ключу-игроку и раньше не чистилось
-    -- (на сервере с текучкой — утечка + чужой HP у нового игрока).
-    hpSmooth[plr] = nil
-    hpPrev[plr] = nil
-    hpFlash[plr] = nil
 end
 
 local function addPlayer(plr)
@@ -2151,7 +2149,7 @@ local PE_FPS_ORIG = nil
 G.PE.FPSBoost = function(on)
     pcall(function()
         if on then
-            -- v2.52: сохраняем оригинал только ОДИН раз. Повторное
+            -- v2.53: сохраняем оригинал только ОДИН раз. Повторное
             -- включение затирало "оригинал" уже бустнутыми значениями и
             -- RESTORE возвращал Level01 вместо настроек пользователя.
             if not PE_FPS_ORIG then
@@ -2623,7 +2621,7 @@ local retAt = 0
 local jpAt = 0
 local PE_LAST_HP = -1
 local PE_HIT_AT = 0
--- v2.52: части, у которых ИМЕННО МЫ выключили коллизию. При выключении
+-- v2.53: части, у которых ИМЕННО МЫ выключили коллизию. При выключении
 -- noclip возвращаем CanCollide только им — раньше ставили true всем
 -- частям персонажа, включая шляпы/аксессуары, которым коллизия не нужна.
 local noclipParts = setmetatable({}, { __mode = "k" })
@@ -2720,31 +2718,33 @@ local function auraTick()
     local humJ = LP.Character
         and LP.Character:FindFirstChildOfClass("Humanoid")
     if humJ then
-        if CFG.SpeedHack or CFG.JumpBoost then
-            CFG._moveWasOn = true
-            if now - jpAt >= 0.25 then
-                jpAt = now
-                pcall(function()
-                    if CFG.JumpBoost then
-                        humJ.UseJumpPower = true
-                        humJ.JumpPower = math.clamp(
-                            tonumber(CFG.JumpPower) or 90, 50, 300)
-                    end
-                    if CFG.SpeedHack then
-                        humJ.WalkSpeed = math.clamp(
-                            tonumber(CFG.SpeedValue) or 40, 16, 150)
-                    end
-                end)
-            end
-        elseif CFG._moveWasOn then
-            -- Тумблеры выключили: сброс в ванилу, чтобы не «застревало».
-            CFG._moveWasOn = nil
+        if now - jpAt >= 0.25 then
+            jpAt = now
             pcall(function()
-                humJ.WalkSpeed = 16
-                humJ.JumpPower = 50
-                humJ.UseJumpPower = true
+                -- v2.53: каждый эффект откатывается САМ, независимо от
+                -- второго тумблера. Раньше SpeedHack-off при живом
+                -- JumpBoost оставлял WalkSpeed 150 навсегда (и наоборот).
+                if CFG.SpeedHack then
+                    CFG._speedWasOn = true
+                    humJ.WalkSpeed = math.clamp(
+                        tonumber(CFG.SpeedValue) or 40, 16, 150)
+                elseif CFG._speedWasOn then
+                    CFG._speedWasOn = nil
+                    humJ.WalkSpeed = 16
+                    print("[PE] speed restored to default (16)")
+                end
+                if CFG.JumpBoost then
+                    CFG._jumpWasOn = true
+                    humJ.UseJumpPower = true
+                    humJ.JumpPower = math.clamp(
+                        tonumber(CFG.JumpPower) or 90, 50, 300)
+                elseif CFG._jumpWasOn then
+                    CFG._jumpWasOn = nil
+                    humJ.UseJumpPower = true
+                    humJ.JumpPower = 50
+                    print("[PE] jump restored to default (50)")
+                end
             end)
-            print("[PE] speed/jump restored to default (16 / 50)")
         end
     end
 
@@ -3339,7 +3339,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.52",
+        LoadingSubtitle = "ESP + Combat v2.53",
         -- Сохранение настроек Rayfield: включаем только если в
         -- исполнителе есть файловая система (сам Rayfield проверит
         -- и предупредит, если нет). Наши дефолты живут в getgenv().
@@ -4034,10 +4034,10 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.InfJump = v end })
     C:CreateToggle({ Name = "FPS boost (low graphics)",
         Flag = "PE_FPSBoost",
-        CurrentValue = CFG.FPSBoost == true,
+        CurrentValue = CFG.FPSBoostOn == true,
         Callback = function(v)
-            CFG.FPSBoost = v
-            if G.PE.FPSBoost then G.PE.FPSBoost(v) end
+            CFG.FPSBoostOn = v
+            if type(G.PE.FPSBoost) == "function" then G.PE.FPSBoost(v) end
         end })
     C:CreateButton({ Name = "TP to crosshair (blink)",
         Callback = function() G.PE.TPCrosshair() end })
@@ -4178,7 +4178,7 @@ local okGUI, errGUI = pcall(function()
             end })
         ST:CreateSection("Info")
         ST:CreateParagraph({ Title = "Version",
-            Content = "PRISON ESP v2.52. ESP + Combat. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.TeamOf(name), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "PRISON ESP v2.53. ESP + Combat. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.TeamOf(name), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
@@ -4388,6 +4388,17 @@ local function refreshTargetPickers()
         pcall(function() d:Refresh(opts) end)
     end
     local topts = teamOpts()
+    -- v2.53: выбранный ник ушёл с сервера (или сохранён с прошлой
+    -- сессии) — isSel=false у всех, аура молча не била НИКОГО.
+    -- Сбрасываем цель на "Everyone", если её больше нет в списке.
+    for _, key in ipairs({ "KillAuraTeam", "C00lTeam" }) do
+        local sel = CFG[key]
+        if type(sel) == "string" and sel ~= "Everyone"
+           and not table.find(topts, sel) then
+            CFG[key] = "Everyone"
+            print("[PE] " .. key .. ": target left the server -> Everyone")
+        end
+    end
     for _, d in ipairs(teamPickers) do
         pcall(function() d:Refresh(topts) end)
     end
@@ -4436,9 +4447,20 @@ G.PE_Stop = function()
         local chrS = LP.Character
         local humS = chrS and chrS:FindFirstChildOfClass("Humanoid")
         if humS then
-            humS.WalkSpeed = 16
+            -- v2.53: не сбиваем нестандартную скорость игры, если хак не
+            -- включали, и снимаем прыжок-буст (раньше JumpPower до 300
+            -- жил после выгрузки).
+            if CFG._speedWasOn then
+                humS.WalkSpeed = 16
+                CFG._speedWasOn = nil
+            end
+            if CFG._jumpWasOn then
+                humS.UseJumpPower = true
+                humS.JumpPower = 50
+                CFG._jumpWasOn = nil
+            end
         end
-        -- v2.52: только те части, что гасил noclip (не шляпы/аксессуары).
+        -- v2.53: только те части, что гасил noclip (не шляпы/аксессуары).
         for p in pairs(noclipParts) do
             if p.Parent then pcall(function() p.CanCollide = true end) end
         end
@@ -4471,7 +4493,9 @@ G.PE_Stop = function()
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     G.PE.FakeShot = nil
     G.PE.WP_Save, G.PE.WP_TP, G.PE.TPCrosshair = nil, nil, nil
-    pcall(function() G.PE.FPSBoost(false) end)
+    if type(G.PE.FPSBoost) == "function" then
+        pcall(function() G.PE.FPSBoost(false) end)
+    end
     G.PE.FPSBoost = nil
     pcall(function()
         if CFG._apocPerchCF then
@@ -4489,10 +4513,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.52 stopped")
+    print("[PE] v2.53 stopped")
 end
 
-print("[PE] v2.52 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.53 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
