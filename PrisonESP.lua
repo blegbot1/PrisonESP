@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.74  (Combat-only: свой GUI PeUI, ESP и NEW-фичи вырезаны)
+--  PRISON ESP  v2.75  (Combat-only: свой GUI PeUI, упрощённый гивер)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -128,20 +128,15 @@ CFG.Retr = CFG.Retr ~= false
 -- АНТИ-АФК: VirtualUser отвечает за нас на idle-проверку Roblox —
 -- долгие сессии без кика.
 CFG.AntiAFK = CFG.AntiAFK ~= false
--- ПРЫЖОК-БУСТ: физика своего персонажа на клиенте, JumpPower наш.
-CFG.JumpBoost = CFG.JumpBoost == true
-CFG.JumpPower = tonumber(CFG.JumpPower) or 90
--- ПАКЕТ ДВИЖЕНИЯ: физика персонажа клиентская (доказано прыжком) —
--- скорость/noclip/полёт честно реплицируются серверу позицией.
-CFG.SpeedHack = CFG.SpeedHack == true
-CFG.SpeedValue = tonumber(CFG.SpeedValue) or 40
-CFG.Noclip = CFG.Noclip == true
--- БЕСКОНЕЧНЫЙ ПРЫЖОК: JumpRequest → Jumping-состояние в воздухе.
-CFG.InfJump = CFG.InfJump == true
--- FPS-БУСТ: минимальное качество рендера + без глобальных теней.
--- v2.53: флаг живёт под ОТДЕЛЬНЫМ ключом FPSBoostOn — ключ FPSBoost
--- занят функцией G.PE.FPSBoost(on), раньше они затирали друг друга.
-CFG.FPSBoostOn = CFG.FPSBoostOn == true
+-- АВТО-КОМАНДА ПОСЛЕ СМЕРТИ: «Off» или команда, в которую скрипт
+-- постоянно возвращает нас (проверка каждую секунду, не один раз).
+CFG.AutoTeam = pickOpt(CFG.AutoTeam,
+    { "Off", "Guard", "Prisoner", "Escaped" }, "Off")
+-- ОБХОД ТИМ-ЧЕКА ДЛЯ АУРЫ: сервер отвергает урон по тиммейтам.
+-- Тумблер крутит нас между Prisoner и Escaped каждые 1.5с (каждый
+-- респавн возвращает в команду) — тогда аура достаёт и зеков, и
+-- охрану. Вызывает респавны — это цена обхода.
+CFG.AuraTeamBypass = CFG.AuraTeamBypass == true
 -- АУРА: максимум целей за тик (6 = дефолт, 20 = мясорубка).
 CFG.AuraMaxHits = tonumber(CFG.AuraMaxHits) or 6
 
@@ -151,7 +146,7 @@ local STOPPED = false
 -- апокалипсис взводились бы до появления окна.
 local PE_GUI_READY = false
 local PeUI
-local auraConn, ijConn
+local auraConn
 local UIS = game:GetService("UserInputService")
 
 
@@ -177,6 +172,27 @@ end)
 local prConn = Players.PlayerRemoving:Connect(function(plr)
     PE_BURN_AT[plr] = nil
     PE_FLING_AT[plr] = nil
+end)
+
+-- АВТО-КОМАНДА: ПОСТОЯННАЯ проверка каждую секунду. Выбрал «Escaped» —
+-- скрипт возвращает тебя туда и после смерти, и после кика из команды.
+-- Пауза, пока работает APOCALYPSE (он сам крутит команды).
+task.spawn(function()
+    while not STOPPED do
+        task.wait(1)
+        if not STOPPED and CFG.AutoTeam and CFG.AutoTeam ~= "Off"
+           and not CFG.Apocalypse and LP.Parent then
+            local t = LP.Team
+            if t and t.Name ~= CFG.AutoTeam then
+                local r = ReplicatedStorage
+                    :FindFirstChild("ChooseTeamEvent")
+                if r then
+                    pcall(function() r:FireServer(CFG.AutoTeam) end)
+                    print("[PE TEAM] auto -> " .. CFG.AutoTeam)
+                end
+            end
+        end
+    end
 end)
 
 -- АВТО-ГИВЕР: после респавна сам выдаём выбранное оружие (если сервер
@@ -609,36 +625,7 @@ end
 
 -- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
 -- ЗАМЕНА ТЕКСТУР удалена (v2.37) по запросу.
-
--- FPS-БУСТ: минимальное качество рендера + без глобальных теней.
--- Оригиналы сохраняем, чтобы RESTORE не затирал пользовательские.
-local PE_FPS_ORIG = nil
-G.PE.FPSBoost = function(on)
-    pcall(function()
-        if on then
-            -- v2.53: сохраняем оригинал только ОДИН раз. Повторное
-            -- включение затирало "оригинал" уже бустнутыми значениями и
-            -- RESTORE возвращал Level01 вместо настроек пользователя.
-            if not PE_FPS_ORIG then
-                PE_FPS_ORIG = {
-                    q = settings().Rendering.QualityLevel,
-                    sh = game:GetService("Lighting").GlobalShadows,
-                }
-            end
-            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
-            game:GetService("Lighting").GlobalShadows = false
-            print("[PE FPS] boost ON (quality 1, shadows off)")
-        else
-            -- Буст не включали — ничего не трогаем (иначе PE_Stop
-            -- сбрасывал графику пользователя на Automatic).
-            if not PE_FPS_ORIG then return end
-            settings().Rendering.QualityLevel = PE_FPS_ORIG.q
-            game:GetService("Lighting").GlobalShadows = PE_FPS_ORIG.sh
-            PE_FPS_ORIG = nil
-            print("[PE FPS] boost OFF (defaults restored)")
-        end
-    end)
-end
+-- FPS-БУСТ удалён (v2.75) по запросу.
 
 -- ТОЧКИ ТЕЛЕПОРТА: живут в getgenv — переживают перезапуск скрипта.
 G.PE_Waypoints = G.PE_Waypoints or {}
@@ -1067,13 +1054,8 @@ local immortalAt = 0
 local immortalTapAt = 0
 local c00lAt = 0
 local retAt = 0
-local jpAt = 0
 local PE_LAST_HP = -1
 local PE_HIT_AT = 0
--- v2.53: части, у которых ИМЕННО МЫ выключили коллизию. При выключении
--- noclip возвращаем CanCollide только им — раньше ставили true всем
--- частям персонажа, включая шляпы/аксессуары, которым коллизия не нужна.
-local noclipParts = setmetatable({}, { __mode = "k" })
 local retTarget, retUntil = nil, 0
 
 -- Поиск атакующего: кто вероятнее ударил/выстрелил — ближайший,
@@ -1170,67 +1152,6 @@ local function auraTick()
            and not toolM:GetAttribute("PE_Marked") then
             G.PE.ModGun()
         end
-    end
-
-    -- СКОРОСТЬ/ПРЫЖОК: применяем раз в 0.25с; при выключении тумблера
-    -- возвращаем Vanilla-значения ОДИН раз (флаг _moveWasOn).
-    local humJ = LP.Character
-        and LP.Character:FindFirstChildOfClass("Humanoid")
-    if humJ then
-        if now - jpAt >= 0.25 then
-            jpAt = now
-            pcall(function()
-                -- v2.53: каждый эффект откатывается САМ, независимо от
-                -- второго тумблера. Раньше SpeedHack-off при живом
-                -- JumpBoost оставлял WalkSpeed 150 навсегда (и наоборот).
-                if CFG.SpeedHack then
-                    CFG._speedWasOn = true
-                    humJ.WalkSpeed = math.clamp(
-                        tonumber(CFG.SpeedValue) or 40, 16, 150)
-                elseif CFG._speedWasOn then
-                    CFG._speedWasOn = nil
-                    humJ.WalkSpeed = 16
-                    print("[PE] speed restored to default (16)")
-                end
-                if CFG.JumpBoost then
-                    CFG._jumpWasOn = true
-                    humJ.UseJumpPower = true
-                    humJ.JumpPower = math.clamp(
-                        tonumber(CFG.JumpPower) or 90, 50, 300)
-                elseif CFG._jumpWasOn then
-                    CFG._jumpWasOn = nil
-                    humJ.UseJumpPower = true
-                    humJ.JumpPower = 50
-                    print("[PE] jump restored to default (50)")
-                end
-            end)
-        end
-    end
-
-    -- NOCLIP: движок возвращает CanCollide на частях каждый физ-шаг,
-    -- поэтому выключаем КАЖДЫЙ КАДР (а не раз в 0.25с) — иначе
-    -- «работает через раз». При выключении включаем коллизии обратно.
-    if CFG.Noclip then
-        local chrN = LP.Character
-        if chrN then
-            for _, p in ipairs(chrN:GetDescendants()) do
-                if p:IsA("BasePart") and p.CanCollide then
-                    p.CanCollide = false
-                    noclipParts[p] = true
-                end
-            end
-        end
-        CFG._noclipWasOn = true
-    elseif CFG._noclipWasOn then
-        CFG._noclipWasOn = nil
-        -- Возвращаем коллизию ТОЛЬКО тем частям, которые сами гасили.
-        for p in pairs(noclipParts) do
-            if p.Parent then
-                pcall(function() p.CanCollide = true end)
-            end
-        end
-        noclipParts = setmetatable({}, { __mode = "k" })
-        print("[PE] noclip off - collisions restored")
     end
 
     -- C00LKIDD MODE: медленно сжигаем всех — крошечный урон каждый
@@ -1568,6 +1489,20 @@ local function auraTick()
     local radius = tonumber(CFG.KillAuraRadius) or 40
     local mode = CFG.KillAuraTeam or "Everyone"
     local myTeam = LP.Team
+    -- ОБХОД ТИМ-ЧЕКА: сервер отвергает урон по тиммейтам. Флип между
+    -- Prisoner и Escaped каждые 1.5с — тогда аура достаёт и зеков, и
+    -- охрану. Цена: сервер РЕСПАВНИТ нас на каждом флипе (пушка
+    -- выпадает — сторож M9 вернёт её в течение 3с).
+    if CFG.AuraTeamBypass and now - (CFG._bypassAt or 0) >= 1.5 then
+        CFG._bypassAt = now
+        CFG._bypassFlip = not CFG._bypassFlip
+        local rB = ReplicatedStorage:FindFirstChild("ChooseTeamEvent")
+        if rB then
+            pcall(function()
+                rB:FireServer(CFG._bypassFlip and "Escaped" or "Prisoner")
+            end)
+        end
+    end
     local hits = 0
     for _, p in ipairs(Players:GetPlayers()) do
         -- Максимум целей за тик (слайдер AuraMaxHits).
@@ -1667,18 +1602,7 @@ end)
 
 -- ПОЛЁТ удалён (v2.74) по запросу.
 
--- БЕСКОНЕЧНЫЙ ПРЫЖОК: каждый JumpRequest в воздухе перезапускает
--- Jumping-состояние (физика наша — сервер видит только позицию).
-ijConn = UIS.JumpRequest:Connect(function()
-    if STOPPED or not PE_GUI_READY or not CFG.InfJump then return end
-    local hum = LP.Character
-        and LP.Character:FindFirstChildOfClass("Humanoid")
-    if hum and hum.Health > 0 then
-        pcall(function()
-            hum:ChangeState(Enum.HumanoidStateType.Jumping)
-        end)
-    end
-end)
+-- БЕСКОНЕЧНЫЙ ПРЫЖОК удалён (v2.75) по запросу.
 
 -- СПИН-БОТ удалён (v2.37) по запросу: при выключении AutoRotate
 -- не возвращался и персонаж переставал поворачиваться.
@@ -2916,6 +2840,14 @@ local okGUI, errGUI = pcall(function()
                 print("[PE IMM] panic-perch engaged")
             end
         end })
+    C:CreateToggle({ Name = "Aura team bypass (hit prisoners AND guards)",
+        Flag = "PE_AuraTeamBypass",
+        CurrentValue = CFG.AuraTeamBypass == true,
+        Callback = function(v)
+            CFG.AuraTeamBypass = v
+            print("[PE] aura team bypass " .. (v and "ON - flipping teams"
+                or "OFF"))
+        end })
 
     C = safeNewTab(W, "Weapon", "crosshair", "Weapon")
     if not C then error("Weapon tab failed") end
@@ -3053,95 +2985,29 @@ local okGUI, errGUI = pcall(function()
             end
         end,
     })
-    C:CreateSection("Movement")
-    C:CreateToggle({ Name = "Speed hack (WalkSpeed)",
-        Flag = "PE_SpeedHack",
-        CurrentValue = CFG.SpeedHack == true,
-        Callback = function(v) CFG.SpeedHack = v end })
-    C:CreateSlider({ Name = "Speed (studs/s)", Flag = "PE_SpeedValue",
-        Range = {16, 150}, Increment = 2,
-        CurrentValue = math.clamp(tonumber(CFG.SpeedValue) or 40, 16, 150),
-        Callback = function(v) CFG.SpeedValue = v end })
-    C:CreateToggle({ Name = "Noclip (walk through walls)",
-        Flag = "PE_Noclip",
-        CurrentValue = CFG.Noclip == true,
-        Callback = function(v) CFG.Noclip = v end })
-    C:CreateToggle({ Name = "Infinite jump (jump in air)",
-        Flag = "PE_InfJump",
-        CurrentValue = CFG.InfJump == true,
-        Callback = function(v) CFG.InfJump = v end })
-    C:CreateToggle({ Name = "FPS boost (low graphics)",
-        Flag = "PE_FPSBoost",
-        CurrentValue = CFG.FPSBoostOn == true,
-        Callback = function(v)
-            CFG.FPSBoostOn = v
-            if type(G.PE.FPSBoost) == "function" then G.PE.FPSBoost(v) end
-        end })
-    C:CreateButton({ Name = "TP to crosshair (blink)",
-        Callback = function() G.PE.TPCrosshair() end })
-    C:CreateInput({ Name = "Waypoint name",
-        PlaceholderText = "e.g. armory",
-        CurrentValue = "",
-        Flag = "PE_WPName",
-        Callback = function(text) CFG._wpName = tostring(text) end })
-    local wpDrop
-    C:CreateButton({ Name = "SAVE waypoint (my position)",
-        Callback = function()
-            G.PE.WP_Save(CFG._wpName)
-            if wpDrop then
-                pcall(function()
-                    local o = {}
-                    for nm in pairs(G.PE_Waypoints) do o[#o + 1] = nm end
-                    table.sort(o)
-                    if #o == 0 then o[1] = "(no waypoints)" end
-                    wpDrop:Refresh(o)
-                end)
-            end
-        end })
-    wpDrop = C:CreateDropdown({
-        Name = "Teleport to waypoint",
-        Flag = "PE_WPPick",
-        Options = (function()
-            local o = {}
-            for nm in pairs(G.PE_Waypoints) do o[#o + 1] = nm end
-            table.sort(o)
-            if #o == 0 then o[1] = "(no waypoints)" end
-            return o
-        end)(),
-        CurrentOption = {},
+    C:CreateSection("Auto team on respawn")
+    C:CreateParagraph({ Title = "Auto team",
+        Content = "Pick a team and the script CONSTANTLY returns you to it - check every second and right after death. Example: set Escaped and any kill puts you back into criminals automatically. Off = never auto-switch. Paused while APOCALYPSE runs (it flips teams itself)." })
+    C:CreateDropdown({
+        Name = "Auto team (constant check)",
+        Flag = "PE_AutoTeamPick",
+        Options = { "Off", "Guard", "Prisoner", "Escaped" },
+        CurrentOption = { CFG.AutoTeam },
         MultipleOptions = false,
         Callback = function(selected)
             local picked = selected
             if type(picked) == "table" then picked = picked[1] end
             if type(picked) == "string" then
-                CFG._wp = picked
-                print("[PE WP] selected: " .. picked)
+                CFG.AutoTeam = picked
+                print("[PE TEAM] auto team = " .. picked)
             end
         end,
     })
-    C:CreateButton({ Name = "TELEPORT to waypoint",
-        Callback = function()
-            G.PE.WP_TP(CFG._wp)
-            pcall(function()
-                local o = {}
-                for nm in pairs(G.PE_Waypoints) do o[#o + 1] = nm end
-                table.sort(o)
-                if #o == 0 then o[1] = "(no waypoints)" end
-                wpDrop:Refresh(o)
-            end)
-        end })
+    C:CreateSection("Idle & stun")
     C:CreateToggle({ Name = "Anti-AFK (no idle kick)",
         Flag = "PE_AntiAFK",
         CurrentValue = CFG.AntiAFK ~= false,
         Callback = function(v) CFG.AntiAFK = v end })
-    C:CreateToggle({ Name = "Jump boost (higher jumps)",
-        Flag = "PE_JumpBoost",
-        CurrentValue = CFG.JumpBoost == true,
-        Callback = function(v) CFG.JumpBoost = v end })
-    C:CreateSlider({ Name = "Jump power", Flag = "PE_JumpPower",
-        Range = {50, 300}, Increment = 5,
-        CurrentValue = math.clamp(tonumber(CFG.JumpPower) or 90, 50, 300),
-        Callback = function(v) CFG.JumpPower = v end })
     C:CreateToggle({ Name = "Anti-stun (taser/cuffs/ragdoll)", Flag = "PE_AntiStun",
         CurrentValue = CFG.AntiStun ~= false,
         Callback = function(v) CFG.AntiStun = v end })
@@ -3168,12 +3034,32 @@ local okGUI, errGUI = pcall(function()
             if type(picked) == "string" then CFG.AutoGiveName = picked end
         end,
     })
-    C:CreateButton({ Name = "GIVE ALL (guns + KeyCard)",
-        Callback = function() G.PE.GiveAll() end })
-    for _, nm in ipairs(GIVE_ITEMS) do
-        C:CreateButton({ Name = "Give: " .. nm,
-            Callback = function() G.PE.Give(nm) end })
-    end
+    C:CreateDropdown({
+        Name = "Give weapon",
+        Flag = "PE_GivePick",
+        Options = (function()
+            local o = {}
+            for _, nm in ipairs(GIVE_ITEMS) do o[#o + 1] = nm end
+            table.insert(o, "GIVE ALL")
+            return o
+        end)(),
+        CurrentOption = { "M9" },
+        MultipleOptions = false,
+        Callback = function(selected)
+            local picked = selected
+            if type(picked) == "table" then picked = picked[1] end
+            if type(picked) == "string" then CFG._givePick = picked end
+        end,
+    })
+    C:CreateButton({ Name = "GIVE selected weapon",
+        Callback = function()
+            local want = CFG._givePick or "M9"
+            if want == "GIVE ALL" then
+                G.PE.GiveAll()
+            else
+                G.PE.Give(want)
+            end
+        end })
     C:CreateButton({ Name = "Open ALL doors (jail cells)",
         Callback = function() G.PE.Doors() end })
     C:CreateButton({ Name = "Gun source -> console (decompile)",
@@ -3218,7 +3104,7 @@ local okGUI, errGUI = pcall(function()
             end })
         ST:CreateSection("Info")
         ST:CreateParagraph({ Title = "Version",
-            Content = "PRISON ESP v2.74 (Combat-only, built-in PeUI). Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "PRISON ESP v2.75 (Combat-only, built-in PeUI). Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
@@ -3397,30 +3283,6 @@ G.PE_Stop = function()
     STOPPED = true
     pcall(function() clickConn:Disconnect() end)
     pcall(function() auraConn:Disconnect() end)
-    pcall(function() ijConn:Disconnect() end)
-    pcall(function()
-        local chrS = LP.Character
-        local humS = chrS and chrS:FindFirstChildOfClass("Humanoid")
-        if humS then
-            -- v2.53: не сбиваем нестандартную скорость игры, если хак не
-            -- включали, и снимаем прыжок-буст (раньше JumpPower до 300
-            -- жил после выгрузки).
-            if CFG._speedWasOn then
-                humS.WalkSpeed = 16
-                CFG._speedWasOn = nil
-            end
-            if CFG._jumpWasOn then
-                humS.UseJumpPower = true
-                humS.JumpPower = 50
-                CFG._jumpWasOn = nil
-            end
-        end
-        -- v2.53: только те части, что гасил noclip (не шляпы/аксессуары).
-        for p in pairs(noclipParts) do
-            if p.Parent then pcall(function() p.CanCollide = true end) end
-        end
-        noclipParts = setmetatable({}, { __mode = "k" })
-    end)
     -- Анти-стан запрещал регдолл-состояния навсегда: после выгрузки
     -- возвращаем, иначе тазер/регдолл не валят до следующего респавна.
     pcall(function()
@@ -3457,10 +3319,7 @@ G.PE_Stop = function()
             if rImm then rImm.Anchored = false end
         end
     end)
-    if type(G.PE.FPSBoost) == "function" then
-        pcall(function() G.PE.FPSBoost(false) end)
-    end
-    G.PE.FPSBoost = nil
+    -- FPS-буст удалён (v2.75): функция не существует.
     CFG._ensureBusy = nil
     pcall(function()
         if CFG._apocPerchCF then
@@ -3478,9 +3337,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.74 stopped")
+    print("[PE] v2.75 stopped")
 end
 
-print("[PE] v2.74 started (Combat-only, PeUI built-in)"
+print("[PE] v2.75 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
