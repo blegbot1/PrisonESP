@@ -2029,6 +2029,37 @@ local function myGunRemote(remoteName)
             end
         end
     end
+    -- v2.56: СВОЕЙ ПУШКИ НЕТ — берём ЧУЖУЮ. Ремоут InflictTarget лежит в
+    -- Workspace/<ник>/<оружие>/GunScript_Server. Логи показали, что
+    -- fireclickdetector "true" не кладёт M9 в инвентарь (сервер гивера
+    -- требует команду Guard), поэтому весь бой молчал. Пробуем стрелять
+    -- через ремоут пушки другого игрока.
+    if not res then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP then
+                local ch = p.Character
+                if ch then
+                    for _, t in ipairs(ch:GetChildren()) do
+                        if t:IsA("Tool") then
+                            local gs2 = t:FindFirstChild("GunScript_Server")
+                            local r2 = gs2 and gs2:FindFirstChild(remoteName)
+                            if r2 and r2:IsA("RemoteEvent") then
+                                res, resTool = r2, t
+                                if CFG._borrowLogged ~= p.Name .. t.Name then
+                                    CFG._borrowLogged = p.Name .. t.Name
+                                    print("[PE GUN] no own gun - borrowing "
+                                        .. p.Name .. "/" .. t.Name
+                                        .. " remote")
+                                end
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+            if res then break end
+        end
+    end
     CFG._gunCache = { n = remoteName, t = nowG, r = res, tl = resTool }
     return res, resTool
 end
@@ -2131,7 +2162,9 @@ G.PE.Give = function(itemName)
                 return ok
             end
             warn("[PE GIVE] '" .. itemName .. "' has no ClickDetector")
-            return false
+            -- v2.56: НЕ выходим: моделей с одним именем на карте несколько,
+            -- и кликабельная может оказаться следующей.
+            m = nil
         end
     end
     print("[PE GIVE] model '" .. tostring(itemName) .. "' not found on the ground")
