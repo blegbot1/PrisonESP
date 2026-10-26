@@ -124,6 +124,12 @@ end
 local secureWarnings = {}
 local customAssets = {}
 
+-- PRISONESP PATCH: форвард-объявление — secureNotify (ниже) и созданные
+-- до 529-й строки замыкания иначе захватывали ГЛОБАЛ RayfieldLibrary
+-- (навсегда nil): secure-уведомления не доставлялись, а поллер
+-- task.wait(0.5) жил вечно.
+local RayfieldLibrary
+
 local function secureNotify(wType, title, content)
 	if secureWarnings[wType] then return end
 	secureWarnings[wType] = true
@@ -986,6 +992,9 @@ do
 end
 if PE_Parent then
 	Rayfield.Parent = PE_Parent
+	-- PRISONESP PATCH: в PlayerGui дефолтный ResetOnSpawn=true убивает
+	-- интерфейс (и все его соединения) при первом респавне.
+	Rayfield.ResetOnSpawn = false
 elseif gethui then
 	Rayfield.Parent = gethui()
 elseif syn and syn.protect_gui then
@@ -1015,15 +1024,35 @@ local function retireInterface(Interface: any)
 end
 
 if gethui then
-	for _, Interface in ipairs(gethui():GetChildren()) do
-		if Interface.Name == Rayfield.Name and Interface ~= Rayfield then
-			retireInterface(Interface)
+	local okH, hui = pcall(gethui)
+	if okH and hui then
+		for _, Interface in ipairs(hui:GetChildren()) do
+			if Interface.Name == Rayfield.Name and Interface ~= Rayfield then
+				retireInterface(Interface)
+			end
 		end
 	end
 elseif not useStudio then
 	for _, Interface in ipairs(CoreGui:GetChildren()) do
 		if Interface.Name == Rayfield.Name and Interface ~= Rayfield then
 			retireInterface(Interface)
+		end
+	end
+end
+
+-- PRISONESP PATCH: наша копия живёт в PlayerGui — ретирем и там,
+-- иначе повторный запуск даёт двойное окно и фантомные хоткеи от
+-- старой копии (её соединения продолжают отвечать).
+do
+	local okPG, pgR = pcall(function()
+		local plr = getService("Players").LocalPlayer
+		return plr and plr:FindFirstChildOfClass("PlayerGui")
+	end)
+	if okPG and pgR then
+		for _, Interface in ipairs(pgR:GetChildren()) do
+			if Interface.Name == Rayfield.Name and Interface ~= Rayfield then
+				retireInterface(Interface)
+			end
 		end
 	end
 end
@@ -1435,7 +1464,22 @@ local function LoadConfiguration(Configuration)
 	return changed
 end
 
+-- PRISONESP PATCH: дебаунс записи. ColorPicker/Slider дергают
+-- SaveConfiguration каждый кадр зажатия — было до 60 writefile/с.
+local SaveQueued = false
+local SaveConfigurationNow -- форвард: иначе замыкание ниже захватит глобал nil
 local function SaveConfiguration()
+	if not CEnabled or not globalLoaded then return end
+	if SaveQueued then return end
+	SaveQueued = true
+	task.delay(0.5, function()
+		SaveQueued = false
+		if not CEnabled or not globalLoaded then return end
+		SaveConfigurationNow()
+	end)
+end
+
+function SaveConfigurationNow()
 	if not CEnabled or not globalLoaded then return end
 
 	if debugX then
@@ -2701,8 +2745,9 @@ function RayfieldLibrary:CreateWindow(Settings)
 					ColorPicker.HexInput.InputBox.Text = hex 
 				end
 				pcall(function()ColorPickerSettings.Callback(Color3.fromHSV(h,s,v))end)
-				local r,g,b = math.floor((h*255)+0.5),math.floor((s*255)+0.5),math.floor((v*255)+0.5)
-				ColorPickerSettings.Color = Color3.fromRGB(r,g,b)
+				-- PRISONESP PATCH: раньше HSV-компоненты писались в .Color
+				-- как RGB (конфиг хранил искажённый цвет до следующего драга).
+				ColorPickerSettings.Color = Color3.fromHSV(h,s,v)
 				if not ColorPickerSettings.Ext then
 					SaveConfiguration()
 				end
@@ -2723,7 +2768,8 @@ function RayfieldLibrary:CreateWindow(Settings)
 					box.Text = tostring(save)
 				end
 				local r,g,b = math.floor((h*255)+0.5),math.floor((s*255)+0.5),math.floor((v*255)+0.5)
-				ColorPickerSettings.Color = Color3.fromRGB(r,g,b)
+				-- PRISONESP PATCH: та же HSV-as-RGB ошибка, что и в HEX-пути.
+				ColorPickerSettings.Color = Color3.fromHSV(h,s,v)
 				if not ColorPickerSettings.Ext then
 					SaveConfiguration(ColorPickerSettings.Flag..'\n'..tostring(ColorPickerSettings.Color))
 				end
@@ -3183,7 +3229,17 @@ function RayfieldLibrary:CreateWindow(Settings)
 				TweenService:Create(Dropdown, TweenInfo.new(0.6, Enum.EasingStyle.Exponential), {BackgroundColor3 = SelectedTheme.ElementBackground}):Play()
 			end)
 
+			-- PRISONESP PATCH: тема-соединения опций копятся на сигнале
+			-- Rayfield.Main при каждом Refresh (Refresh пересоздаёт опции,
+			-- старые соединения не отключались никогда — десятки тысяч
+			-- за многочасовую сессию). Держим и отключаем старые.
+			local OptionThemeConns = {}
+
 			local function SetDropdownOptions()
+				for _, c in ipairs(OptionThemeConns) do
+					pcall(function() c:Disconnect() end)
+				end
+				table.clear(OptionThemeConns)
 				for _, Option in ipairs(DropdownSettings.Options) do
 					local DropdownOption = Elements.Template.Dropdown.List.Template:Clone()
 					DropdownOption.Name = Option
@@ -3290,12 +3346,12 @@ function RayfieldLibrary:CreateWindow(Settings)
 						end
 					end)
 
-					Rayfield.Main:GetPropertyChangedSignal('BackgroundColor3'):Connect(function()
-						DropdownOption.UIStroke.Color = SelectedTheme.ElementStroke
-					end)
+						table.insert(OptionThemeConns, Rayfield.Main:GetPropertyChangedSignal('BackgroundColor3'):Connect(function()
+							DropdownOption.UIStroke.Color = SelectedTheme.ElementStroke
+						end))
+					end
 				end
-			end
-			SetDropdownOptions()
+				SetDropdownOptions()
 
 			for _, droption in ipairs(Dropdown.List:GetChildren()) do
 				if droption.ClassName == "Frame" and droption.Name ~= "Placeholder" then
@@ -3305,13 +3361,13 @@ function RayfieldLibrary:CreateWindow(Settings)
 						droption.BackgroundColor3 = SelectedTheme.DropdownSelected
 					end
 
-					Rayfield.Main:GetPropertyChangedSignal('BackgroundColor3'):Connect(function()
+					table.insert(OptionThemeConns, Rayfield.Main:GetPropertyChangedSignal('BackgroundColor3'):Connect(function()
 						if not table.find(DropdownSettings.CurrentOption, droption.Name) then
 							droption.BackgroundColor3 = SelectedTheme.DropdownUnselected
 						else
 							droption.BackgroundColor3 = SelectedTheme.DropdownSelected
 						end
-					end)
+					end))
 				end
 			end
 
@@ -3340,7 +3396,10 @@ function RayfieldLibrary:CreateWindow(Settings)
 
 
 				local Success, Response = pcall(function()
-					DropdownSettings.Callback(NewOption)
+					-- PRISONESP PATCH: колбэк всегда получает таблицу
+					-- CurrentOption (как из клика и LoadConfiguration), а не
+					-- сырой аргумент Set — иначе тип колбэка нестабилен.
+					DropdownSettings.Callback(DropdownSettings.CurrentOption)
 				end)
 				if not Success then
 					TweenService:Create(Dropdown, TweenInfo.new(0.6, Enum.EasingStyle.Exponential), {BackgroundColor3 = Color3.fromRGB(85, 0, 0)}):Play()
@@ -3367,6 +3426,11 @@ function RayfieldLibrary:CreateWindow(Settings)
 			end
 
 			function DropdownSettings:Refresh(optionsTable: table) -- updates a dropdown with new options from optionsTable
+				-- PRISONESP PATCH: Refresh(nil)/не-таблица из внешнего цикла
+				-- ронял ipairs прямо в 5-секундном refresher'е.
+				if type(optionsTable) ~= "table" then
+					optionsTable = DropdownSettings.Options or {}
+				end
 				DropdownSettings.Options = optionsTable
 				for _, option in Dropdown.List:GetChildren() do
 					if option.ClassName == "Frame" and option.Name ~= "Placeholder" then
@@ -3760,19 +3824,28 @@ function RayfieldLibrary:CreateWindow(Settings)
 				TweenService:Create(Slider, TweenInfo.new(0.6, Enum.EasingStyle.Exponential), {BackgroundColor3 = SelectedTheme.ElementBackground}):Play()
 			end)
 
-			Slider.Main.Interact.InputBegan:Connect(function(Input)
-				if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then 
-					TweenService:Create(Slider.Main.UIStroke, TweenInfo.new(0.6, Enum.EasingStyle.Exponential), {Transparency = 1}):Play()
-					TweenService:Create(Slider.Main.Progress.UIStroke, TweenInfo.new(0.6, Enum.EasingStyle.Exponential), {Transparency = 1}):Play()
-					SLDragging = true 
-				end 
+			-- PRISONESP PATCH: если элемент уничтожен во время зажатия,
+			-- InputEnded не придёт — SLDragging навсегда true и Stepped-цикл
+			-- (строки ниже) крутится вечно по мёртвому инстансу.
+			local SliderLoop
+			Slider.Destroying:Connect(function()
+				SLDragging = false
+				if SliderLoop then pcall(function() SliderLoop:Disconnect() end) end
 			end)
 
-			Slider.Main.Interact.InputEnded:Connect(function(Input) 
-				if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then 
+			Slider.Main.Interact.InputBegan:Connect(function(Input)
+				if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+					TweenService:Create(Slider.Main.UIStroke, TweenInfo.new(0.6, Enum.EasingStyle.Exponential), {Transparency = 1}):Play()
+					TweenService:Create(Slider.Main.Progress.UIStroke, TweenInfo.new(0.6, Enum.EasingStyle.Exponential), {Transparency = 1}):Play()
+					SLDragging = true
+				end
+			end)
+
+			Slider.Main.Interact.InputEnded:Connect(function(Input)
+				if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 					TweenService:Create(Slider.Main.UIStroke, TweenInfo.new(0.6, Enum.EasingStyle.Exponential), {Transparency = 0.4}):Play()
 					TweenService:Create(Slider.Main.Progress.UIStroke, TweenInfo.new(0.6, Enum.EasingStyle.Exponential), {Transparency = 0.3}):Play()
-					SLDragging = false 
+					SLDragging = false
 				end 
 			end)
 
@@ -3840,6 +3913,7 @@ function RayfieldLibrary:CreateWindow(Settings)
 						Loop:Disconnect()
 					end
 				end)
+				SliderLoop = Loop
 			end)
 
 			function SliderSettings:Set(NewVal)
