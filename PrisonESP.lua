@@ -2129,7 +2129,12 @@ G.PE.Ash = function(mode)
         "ShotRadar", "Chams", "Noclip", "Fly", "InfJump", "SpeedHack",
         "JumpBoost", "AntiStun", "ModGunAuto", "Items", "DangerESP",
         "InvisWall", "Skeleton", "HealthBars", "HeadBox", "Snaplines",
-        "OffArrows", "GroundRing", "Minimap", "Boxes", "MoveVec" }) do
+        "OffArrows", "GroundRing", "Minimap", "Boxes", "MoveVec",
+        -- v2.64: подписи и сами роли — иначе после «пепла» над всеми
+        -- висели плашки «[ЗЕК] [M9] Ник 32 st HP 87%», включая админа.
+        "Names", "RoleTags", "WeaponESP", "ShowDist", "ShowHP",
+        "ShowSpeed", "AdminESP", "GuardESP", "PrisonerESP",
+        "CriminalESP", "PlayerESP" }) do
         CFG[k] = false
     end
     -- v2.63: паник-гейт в auraTick не пускает штатный откат, поэтому
