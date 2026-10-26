@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.51
+--  PRISON ESP  v2.52
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  ESP полностью перенесён из BloodyStreetESP v11.53 и адаптирован
@@ -159,7 +159,7 @@ CFG.GunKnockback = tonumber(CFG.GunKnockback) or 0
 CFG.GunPiercing = tonumber(CFG.GunPiercing) or 5
 -- ПРОКАЧКА v2: полный список полей Setting-модуля (из Studio-копии
 -- игры): хедшот-множитель, дробовик, очередь, взрывные пули.
-CFG.GunHeadshot = tonumber(CFG.GunHeadshot) or 500
+CFG.GunHeadshot = tonumber(CFG.GunHeadshot) or 200
 CFG.GunShotgun = CFG.GunShotgun ~= false
 CFG.GunPellets = tonumber(CFG.GunPellets) or 8
 CFG.GunBurst = tonumber(CFG.GunBurst) or 10
@@ -1316,6 +1316,11 @@ local function removePlayer(plr)
     by[plr] = nil
     PE_BURN_AT[plr] = nil
     PE_FLING_AT[plr] = nil
+    -- v2.52: сглаживание HP живёт по ключу-игроку и раньше не чистилось
+    -- (на сервере с текучкой — утечка + чужой HP у нового игрока).
+    hpSmooth[plr] = nil
+    hpPrev[plr] = nil
+    hpFlash[plr] = nil
 end
 
 local function addPlayer(plr)
@@ -1789,7 +1794,11 @@ end)
 
 -- ЧАМСЫ: Highlight на каждом персонаже, цвет по роли, сквозь стены.
 local byChams = setmetatable({}, { __mode = "k" })
-local chamsConn = RunService.Heartbeat:Connect(function()
+-- ВАЖНО: без `local` — коннект должен лечь в переменную, объявленную
+-- строкой 254. Иначе PE_Stop отключает nil, а этот Heartbeat остаётся
+-- жить после стопа (второй экземпляр после рестарта чистит Highlight'ы
+-- у нового).
+chamsConn = RunService.Heartbeat:Connect(function()
     if STOPPED then return end
     if not CFG.Chams then
         if next(byChams) then
@@ -2142,19 +2151,24 @@ local PE_FPS_ORIG = nil
 G.PE.FPSBoost = function(on)
     pcall(function()
         if on then
-            PE_FPS_ORIG = {
-                q = settings().Rendering.QualityLevel,
-                sh = game:GetService("Lighting").GlobalShadows,
-            }
+            -- v2.52: сохраняем оригинал только ОДИН раз. Повторное
+            -- включение затирало "оригинал" уже бустнутыми значениями и
+            -- RESTORE возвращал Level01 вместо настроек пользователя.
+            if not PE_FPS_ORIG then
+                PE_FPS_ORIG = {
+                    q = settings().Rendering.QualityLevel,
+                    sh = game:GetService("Lighting").GlobalShadows,
+                }
+            end
             settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
             game:GetService("Lighting").GlobalShadows = false
             print("[PE FPS] boost ON (quality 1, shadows off)")
         else
-            local q = PE_FPS_ORIG and PE_FPS_ORIG.q
-                or Enum.QualityLevel.Automatic
-            local sh = PE_FPS_ORIG and PE_FPS_ORIG.sh or true
-            settings().Rendering.QualityLevel = q
-            game:GetService("Lighting").GlobalShadows = sh
+            -- Буст не включали — ничего не трогаем (иначе PE_Stop
+            -- сбрасывал графику пользователя на Automatic).
+            if not PE_FPS_ORIG then return end
+            settings().Rendering.QualityLevel = PE_FPS_ORIG.q
+            game:GetService("Lighting").GlobalShadows = PE_FPS_ORIG.sh
             PE_FPS_ORIG = nil
             print("[PE FPS] boost OFF (defaults restored)")
         end
@@ -2451,7 +2465,7 @@ G.PE.ModGun = function(dmg)
     S.BaseDamage = dmg
     S.HeadshotEnabled = true
     S.HeadshotDamageMultiplier = math.clamp(
-        tonumber(CFG.GunHeadshot) or 500, 2, 200)
+        tonumber(CFG.GunHeadshot) or 200, 2, 200)
     S.Auto = true
     S.FireRate = 0.05
     S.ReloadTime = 0.5
@@ -2496,7 +2510,7 @@ G.PE.ModGun = function(dmg)
     end
     pcall(function() tool:SetAttribute("PE_Marked", true) end)
     print("[PE MOD] " .. tool.Name .. " upgraded: damage " .. dmg
-        .. ", headshot x" .. (tonumber(CFG.GunHeadshot) or 500)
+        .. ", headshot x" .. (tonumber(CFG.GunHeadshot) or 200)
         .. (CFG.GunShotgun and (", shotgun " .. (tonumber(CFG.GunPellets) or 8)
             .. " pellets") or "")
         .. (CFG.GunExplosive and (", explosive r"
@@ -2609,6 +2623,10 @@ local retAt = 0
 local jpAt = 0
 local PE_LAST_HP = -1
 local PE_HIT_AT = 0
+-- v2.52: части, у которых ИМЕННО МЫ выключили коллизию. При выключении
+-- noclip возвращаем CanCollide только им — раньше ставили true всем
+-- частям персонажа, включая шляпы/аксессуары, которым коллизия не нужна.
+local noclipParts = setmetatable({}, { __mode = "k" })
 local retTarget, retUntil = nil, 0
 
 -- Поиск атакующего: кто вероятнее ударил/выстрелил — ближайший,
@@ -2739,20 +2757,20 @@ local function auraTick()
             for _, p in ipairs(chrN:GetDescendants()) do
                 if p:IsA("BasePart") and p.CanCollide then
                     p.CanCollide = false
+                    noclipParts[p] = true
                 end
             end
         end
         CFG._noclipWasOn = true
     elseif CFG._noclipWasOn then
         CFG._noclipWasOn = nil
-        local chrN = LP.Character
-        if chrN then
-            for _, p in ipairs(chrN:GetDescendants()) do
-                if p:IsA("BasePart") and not p.CanCollide then
-                    pcall(function() p.CanCollide = true end)
-                end
+        -- Возвращаем коллизию ТОЛЬКО тем частям, которые сами гасили.
+        for p in pairs(noclipParts) do
+            if p.Parent then
+                pcall(function() p.CanCollide = true end)
             end
         end
+        noclipParts = setmetatable({}, { __mode = "k" })
         print("[PE] noclip off - collisions restored")
     end
 
@@ -3321,7 +3339,7 @@ local okGUI, errGUI = pcall(function()
         Name = "PRISON ESP",   -- ОБЯЗАТЕЛЬНО: без него Text=nil и
                                -- CreateWindow умирает на полпути
         LoadingTitle = "PRISON ESP",
-        LoadingSubtitle = "ESP + Combat v2.51",
+        LoadingSubtitle = "ESP + Combat v2.52",
         -- Сохранение настроек Rayfield: включаем только если в
         -- исполнителе есть файловая система (сам Rayfield проверит
         -- и предупредит, если нет). Наши дефолты живут в getgenv().
@@ -3857,7 +3875,7 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.GunAmmoHack = v end })
     C:CreateSlider({ Name = "Headshot multiplier", Flag = "PE_GunHeadshot",
         Range = {2, 200}, Increment = 1,
-        CurrentValue = math.clamp(tonumber(CFG.GunHeadshot) or 500, 2, 200),
+        CurrentValue = math.clamp(tonumber(CFG.GunHeadshot) or 200, 2, 200),
         Callback = function(v) CFG.GunHeadshot = v end })
     C:CreateSlider({ Name = "Burst bullets per click", Flag = "PE_GunBurst",
         Range = {1, 15}, Increment = 1,
@@ -4160,7 +4178,7 @@ local okGUI, errGUI = pcall(function()
             end })
         ST:CreateSection("Info")
         ST:CreateParagraph({ Title = "Version",
-            Content = "PRISON ESP v2.51. ESP + Combat. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.TeamOf(name), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "PRISON ESP v2.52. ESP + Combat. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.TeamOf(name), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
@@ -4419,12 +4437,12 @@ G.PE_Stop = function()
         local humS = chrS and chrS:FindFirstChildOfClass("Humanoid")
         if humS then
             humS.WalkSpeed = 16
-            if chrS then
-                for _, p in ipairs(chrS:GetDescendants()) do
-                    if p:IsA("BasePart") then p.CanCollide = true end
-                end
-            end
         end
+        -- v2.52: только те части, что гасил noclip (не шляпы/аксессуары).
+        for p in pairs(noclipParts) do
+            if p.Parent then pcall(function() p.CanCollide = true end) end
+        end
+        noclipParts = setmetatable({}, { __mode = "k" })
     end)
     -- Анти-стан запрещал регдолл-состояния навсегда: после выгрузки
     -- возвращаем, иначе тазер/регдолл не валят до следующего респавна.
@@ -4471,10 +4489,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.51 stopped")
+    print("[PE] v2.52 stopped")
 end
 
-print("[PE] v2.51 started | Drawing=" .. tostring(DRAW_OK)
+print("[PE] v2.52 started | Drawing=" .. tostring(DRAW_OK)
     .. " | Rayfield=" .. tostring(Rayfield ~= nil)
     .. " | source=" .. tostring(rfSource or "NOT loaded")
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...) / PE.TeamOf(...)"
