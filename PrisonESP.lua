@@ -2189,7 +2189,6 @@ G.PE.Ghost = function(on)
     if not chr then print("[PE GHOST] no character") return end
     local root = chr:FindFirstChild("HumanoidRootPart")
     if on then
-        CFG._ghostHome = root and root.CFrame
         CFG.Chams = false
         for _, p in ipairs(chr:GetDescendants()) do
             if p:IsA("BasePart") then
@@ -2197,13 +2196,8 @@ G.PE.Ghost = function(on)
                 pcall(function() p.Transparency = 1 end)
             end
         end
-        if root then
-            pcall(function()
-                root.Anchored = true
-                root.CFrame = CFrame.new(-347.7, -85.5, -535.1)
-            end)
-        end
-        print("[PE GHOST] ON - invisible, parked in Lobby under the map")
+        print("[PE GHOST] ON - you are see-through locally "
+            .. "(others still see you; AUTO-HOP is the cheater counter)")
     else
         for _, p in ipairs(chr:GetDescendants()) do
             if p:IsA("BasePart") then
@@ -2211,13 +2205,6 @@ G.PE.Ghost = function(on)
                 pcall(function() p.Transparency = 0 end)
             end
         end
-        if root then
-            if CFG._ghostHome then
-                pcall(function() root.CFrame = CFG._ghostHome end)
-            end
-            pcall(function() root.Anchored = false end)
-        end
-        CFG._ghostHome = nil
         print("[PE GHOST] OFF - visible again")
     end
 end
@@ -3757,6 +3744,9 @@ local function auraTick()
                     -- консолью/прошлой сессией значения не спамят сервер.
                     local dmg = math.clamp(
                         tonumber(CFG.KillAuraDamage) or 50, 1, 5000)
+                    -- v2.68: ИНСТА-КИЛЛ — максимальный урон и все цели,
+                    -- без слайдеров: люди падают с 1-2 пакетов.
+                    if CFG.InstaKill then dmg = 5000 end
                     local dir = Vector3.new(0, 0, 1)
                     local delta = root.Position - myRoot.Position
                     if delta.Magnitude > 0.01 then dir = delta.Unit end
@@ -4609,6 +4599,13 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v) CFG.ApocDamage = v end })
 
     C:CreateSection("NEW: guillotine / vortex / wanted / thrones / ash")
+    C:CreateToggle({ Name = "INSTA-KILL: 5000 dmg to every target",
+        Flag = "PE_InstaKill",
+        CurrentValue = CFG.InstaKill == true,
+        Callback = function(v)
+            CFG.InstaKill = v
+            print("[PE] insta-kill " .. (v and "ON (5000 dmg)" or "OFF"))
+        end })
     C:CreateToggle({ Name = "GHOST: invisible (park under the map)",
         Flag = "PE_Ghost",
         CurrentValue = false,
