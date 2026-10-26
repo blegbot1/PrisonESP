@@ -108,6 +108,8 @@ CFG.OffArrows     = CFG.OffArrows ~= false
 CFG.GroundRing    = CFG.GroundRing == true
 CFG.MoveVec       = CFG.MoveVec == true
 CFG.LiteESP       = CFG.LiteESP == true
+-- ЭХОЛОТ: трассеры всех выстрелов на карте (только чтение ремоутов).
+CFG.ShotRadar     = CFG.ShotRadar ~= false
 
 -- ---------- ESP: миникарта ----------
 CFG.Minimap     = CFG.Minimap == true
@@ -1854,6 +1856,76 @@ chamsConn = RunService.Heartbeat:Connect(function()
             end
         end
     end)
+end)
+
+-- ============================================================
+--  ЭХОЛОТ: радар выстрелов. Слушаем VisualizeBullet у всех пушек —
+--  сервер ретранслирует трассер всем, значит видно КТО, ОТКУДА и КУДА
+--  стрелял, сквозь стены и на всю карту. Ноль своих пакетов.
+-- ============================================================
+local tracers, tracerI = {}, 0
+local function shotTracer(from, to, col)
+    tracerI = (tracerI % 12) + 1
+    local t = tracers[tracerI]
+    if not t then
+        local okD, l = pcall(function() return Drawing.new("Line") end)
+        if not okD or not l then return end
+        l.Thickness = 2
+        l.Visible = false
+        t = { ln = l }
+        tracers[tracerI] = t
+    end
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local a, b2 = vProj(cam, from), vProj(cam, to)
+    if not a or not b2 or a.Z <= 0 or b2.Z <= 0 then return end
+    local ln = t.ln
+    ln.From = Vector2.new(a.X, a.Y)
+    ln.To = Vector2.new(b2.X, b2.Y)
+    ln.Color = col
+    ln.Transparency = 0.2
+    ln.Visible = true
+    task.delay(1.1, function()
+        pcall(function() ln.Visible = false end)
+    end)
+end
+
+local function hookShotRemotes()
+    if STOPPED or not CFG.ShotRadar or not DRAW_OK then return end
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("Tool") then
+            local vb = d:FindFirstChild("VisualizeBullet")
+            if vb and vb:IsA("RemoteEvent")
+               and not vb:GetAttribute("PE_Hooked") then
+                vb:SetAttribute("PE_Hooked", true)
+                vb.OnClientEvent:Connect(function(handle, off, hitPos)
+                    if STOPPED or not CFG.ShotRadar then return end
+                    if typeof(hitPos) ~= "Vector3" then return end
+                    local shooter, muzzle = nil, nil
+                    if handle and typeof(handle) == "Instance"
+                       and handle:IsA("BasePart") then
+                        local ch = handle:FindFirstAncestorOfClass("Model")
+                        shooter = ch and Players:GetPlayerFromCharacter(ch)
+                        local offV = (typeof(off) == "Vector3")
+                            and off or Vector3.new(0, 0, 0)
+                        muzzle = handle.CFrame * CFrame.new(offV)
+                            and (handle.CFrame * CFrame.new(offV)).Position
+                    end
+                    muzzle = muzzle or hitPos
+                    local col = shooter and roleColor(roleOf(shooter))
+                        or Color3.fromRGB(255, 255, 255)
+                    shotTracer(muzzle, hitPos, col)
+                end)
+            end
+        end
+    end
+end
+task.spawn(function()
+    task.wait(2)
+    while not STOPPED do
+        pcall(hookShotRemotes)
+        task.wait(2)
+    end
 end)
 
 -- ============================================================
@@ -3899,6 +3971,13 @@ local okGUI, errGUI = pcall(function()
     T:CreateToggle({ Name = "Lite ESP mode (less load)", Flag = "PE_LiteESP",
         CurrentValue = CFG.LiteESP == true,
         Callback = function(v) CFG.LiteESP = v end })
+    T:CreateToggle({ Name = "SHOT RADAR: who shoots and where",
+        Flag = "PE_ShotRadar",
+        CurrentValue = CFG.ShotRadar ~= false,
+        Callback = function(v)
+            CFG.ShotRadar = v
+            print("[PE RADAR] " .. (v and "ON" or "OFF"))
+        end })
 
     T:CreateSection("Minimap")
     T:CreateToggle({ Name = "Minimap", Flag = "PE_Minimap",
