@@ -110,6 +110,8 @@ CFG.MoveVec       = CFG.MoveVec == true
 CFG.LiteESP       = CFG.LiteESP == true
 -- ЭХОЛОТ: трассеры всех выстрелов на карте (только чтение ремоутов).
 CFG.ShotRadar     = CFG.ShotRadar ~= false
+-- ПЕПЕЛ: паник-очистка, когда на сервер заходит админ.
+CFG.AshAuto       = CFG.AshAuto ~= false
 
 -- ---------- ESP: миникарта ----------
 CFG.Minimap     = CFG.Minimap == true
@@ -1929,6 +1931,253 @@ task.spawn(function()
 end)
 
 -- ============================================================
+--  НОВЫЕ ФИЧИ v2.59: гильотина, воронка, розыск, троны, пепел, мститель
+-- ============================================================
+local function peChar(p)
+    local ch = p and p.Character
+    local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+    local root = ch and ch:FindFirstChild("HumanoidRootPart")
+    return ch, hum, root
+end
+local function peNearestPart(nm, pos, maxD)
+    local best, bestD
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("BasePart") and d.Name == nm then
+            local dd = (d.Position - pos).Magnitude
+            if dd <= (maxD or 400) and (not bestD or dd < bestD) then
+                best, bestD = d, dd
+            end
+        end
+    end
+    return best
+end
+local function pePickTarget()
+    local sel = CFG.KillAuraTeam
+    if type(sel) == "string" and sel ~= "" and sel ~= "Everyone" then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP and (p.Name == sel or p.DisplayName == sel) then
+                return p
+            end
+        end
+    end
+    local _, _, myRootP = peChar(LP)
+    local best, bestD
+    for _, p in ipairs(Players:GetPlayers()) do
+        local _, hum, root = peChar(p)
+        if p ~= LP and hum and hum.Health > 0 and root and myRootP then
+            local d = (root.Position - myRootP.Position).Magnitude
+            if not bestD or d < bestD then best, bestD = p, d end
+        end
+    end
+    return best
+end
+
+-- ГИЛЬОТИНА: подброс + толчок в Death Part (смерть от карты, не от нас).
+G.PE.Guillotine = function(namePart)
+    local plr = namePart and findPlayer(tostring(namePart)) or pePickTarget()
+    local _, hum, root = peChar(plr)
+    if not (hum and root and hum.Health > 0) then
+        print("[PE GUILLOTINE] no live target")
+        return
+    end
+    local part = peNearestPart("Death Part", root.Position, 400)
+    local r = myGunRemote("InflictTarget")
+    if not part then print("[PE GUILLOTINE] no Death Part nearby") return end
+    if not r then print("[PE GUILLOTINE] no gun") return end
+    pcall(function()
+        r:FireServer(hum, root, 1, Vector3.new(0, 1, 0), 3500, 0, false)
+    end)
+    task.delay(0.25, function()
+        local _, hum2, root2 = peChar(plr)
+        if not (hum2 and root2) then return end
+        local dir = part.Position + Vector3.new(0, 1, 0) - root2.Position
+        if dir.Magnitude > 0.01 then dir = dir.Unit
+        else dir = Vector3.new(0, 1, 0) end
+        pcall(function()
+            r:FireServer(hum2, root2, 1, dir,
+                tonumber(CFG.DeathImpulse) or 8000, 0, false)
+        end)
+        print("[PE GUILLOTINE] " .. tostring(plr.Name) .. " -> Death Part")
+    end)
+end
+
+-- ВОРОНКА: притянуть до 6 целей в точку (ко мне / Death / Escape).
+G.PE.Vortex = function(mode)
+    local _, _, myRootV = peChar(LP)
+    if not myRootV then return end
+    local point = myRootV.Position
+    if mode == "death" then
+        local d = peNearestPart("Death Part", myRootV.Position, 400)
+        if d then point = d.Position end
+    elseif mode == "escape" then
+        local e = peNearestPart("EscapePart", myRootV.Position, 2000)
+        if e then point = e.Position end
+    end
+    local r = myGunRemote("InflictTarget")
+    if not r then print("[PE VORTEX] no gun") return end
+    local n = 0
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and n < 6 then
+            local _, hum, root = peChar(p)
+            if hum and hum.Health > 0 and root and not root.Anchored
+               and not hum.Sit
+               and (root.Position - point).Magnitude <= 60 then
+                local dir = point - root.Position
+                if dir.Magnitude > 2 then dir = dir.Unit
+                else dir = Vector3.new(0, 1, 0) end
+                pcall(function()
+                    r:FireServer(hum, root, 1, dir,
+                        tonumber(CFG.VortexImpulse) or 3000, 0, false)
+                end)
+                n = n + 1
+            end
+        end
+    end
+    print("[PE VORTEX] pulled " .. n)
+end
+
+-- РОЗЫСК: зонд протокола CriminalStatusRemote + 4 варианта очистки/метки.
+G.PE.Wanted = function(clear, namePart)
+    local rem = ReplicatedStorage:FindFirstChild("CriminalStatusRemote", true)
+    if not rem then print("[PE WANTED] remote not found") return end
+    local target = clear and LP
+        or (namePart and findPlayer(tostring(namePart)) or pePickTarget())
+    if not target then print("[PE WANTED] no target") return end
+    if not CFG._wantedHooked then
+        CFG._wantedHooked = true
+        rem.OnClientEvent:Connect(function(...)
+            print("[PE WANTED] <-", ...)
+        end)
+    end
+    local variants = clear
+        and { { false }, { 0 }, { target, false }, { target, 0 } }
+        or { { target, true }, { target.Name, true } }
+    task.spawn(function()
+        for _, args in ipairs(variants) do
+            pcall(function() rem:FireServer(table.unpack(args)) end)
+            task.wait(0.45)
+        end
+        print("[PE WANTED] sent " .. #variants .. " variants for " .. target.Name)
+    end)
+end
+
+-- ТРОНЫ: невидимые Seat (Tr=1, CanCollide) как подставки в воздухе.
+local throneList, throneAt = {}, 0
+local function scanThrones()
+    throneList = {}
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("Seat") and d.Transparency >= 1 and d.CanCollide
+           and d.Anchored and d.Position.Y > 15 then
+            throneList[#throneList + 1] = d
+        end
+    end
+    table.sort(throneList, function(a, b) return a.Position.Y > b.Position.Y end)
+end
+G.PE.Throne = function(mode)
+    local _, _, root = peChar(LP)
+    if not root then return end
+    if mode == "back" then
+        if CFG._throneHome then
+            root.CFrame = CFG._throneHome
+            CFG._throneHome = nil
+        end
+        return
+    end
+    if #throneList == 0 or os.clock() - throneAt > 30 then
+        throneAt = os.clock()
+        scanThrones()
+    end
+    if #throneList == 0 then
+        print("[PE THRONE] no invisible seats found")
+        return
+    end
+    local s
+    if mode == "top" then s = throneList[1]
+    elseif mode == "random" then s = throneList[math.random(1, #throneList)]
+    else
+        local bestD, best
+        for _, t in ipairs(throneList) do
+            local d = (t.Position - root.Position).Magnitude
+            if not bestD or d < bestD then bestD, best = d, t end
+        end
+        s = best
+    end
+    if not s then return end
+    CFG._throneHome = root.CFrame
+    root.CFrame = s.CFrame + Vector3.new(0, 3.5, 0)
+    print("[PE THRONE] Y=" .. math.floor(s.Position.Y)
+        .. " (" .. #throneList .. " seats)")
+end
+
+-- ПЕПЕЛ: паник-очистка. Скрипт остаётся, но спит (CFG._panic).
+G.PE.Ash = function(mode)
+    CFG._panic = true
+    for _, k in ipairs({ "KillAura", "Apocalypse", "C00lMode", "FirePaint",
+        "AutoGive", "Immortal", "AuraFling", "Retr", "GunFire",
+        "ShotRadar", "Chams" }) do
+        CFG[k] = false
+    end
+    pcall(VIS.destroy)
+    for _, h in pairs(byItems) do pcall(function() h:Destroy() end) end
+    for _, h in pairs(byDanger) do pcall(function() h:Destroy() end) end
+    if mode == "hard" then
+        local _, _, root = peChar(LP)
+        if root then
+            CFG._throneHome = nil
+            root.CFrame = CFrame.new(-347.7, -85.5, -535.1)
+        end
+    end
+    print("[PE ASH] panic " .. tostring(mode or "soft")
+        .. " - noisy features OFF (press RE-ARM to restore)")
+end
+G.PE.Rearm = function()
+    CFG._panic = nil
+    print("[PE ASH] re-arm: features may be enabled again")
+end
+
+-- МСТИТЕЛЬ: ТП к последнему атакующему + залп (10 тиков).
+G.PE.Revenge = function()
+    local plr = CFG._lastAtk
+    if not plr or not plr.Parent then
+        print("[PE REVENGE] no attacker recorded yet")
+        return
+    end
+    local _, hum, root = peChar(plr)
+    local _, _, myRootR = peChar(LP)
+    if not (hum and root and myRootR and hum.Health > 0) then return end
+    local r = myGunRemote("InflictTarget")
+    if not r then print("[PE REVENGE] no gun") return end
+    local home = myRootR.CFrame
+    pcall(function()
+        myRootR.CFrame = root.CFrame * CFrame.new(0, 0, 3)
+    end)
+    task.spawn(function()
+        for _ = 1, 10 do
+            local _, h2, r2 = peChar(plr)
+            if h2 and r2 and h2.Health > 0 then
+                pcall(function()
+                    r:FireServer(h2, r2,
+                        math.clamp(tonumber(CFG.KillAuraDamage) or 50, 1, 5000),
+                        Vector3.new(0, 1, 0), 0, 0, false)
+                end)
+            end
+            task.wait(0.1)
+        end
+        local _, _, rBack = peChar(LP)
+        if rBack then pcall(function() rBack.CFrame = home end) end
+        print("[PE REVENGE] " .. tostring(plr.Name) .. " punished")
+    end)
+end
+
+Players.PlayerAdded:Connect(function(p)
+    if p ~= LP and CFG.AshAuto ~= false and not STOPPED and isAdminP(p) then
+        task.delay(0.5, function()
+            if not STOPPED then G.PE.Ash("soft") end
+        end)
+    end
+end)
+
+-- ============================================================
 --  РАЗВЕДКА: ТТХ пушек, список ремоутов, зонд.
 -- ============================================================
 local function toolList()
@@ -2846,6 +3095,7 @@ local function auraTick()
                 if atk then
                     retTarget = atk
                     retUntil = now + 1.5
+                    CFG._lastAtk = atk
                     print("[PE RET] attacker: " .. atk.Name .. " -> BURN")
                 end
             end
@@ -4221,6 +4471,38 @@ local okGUI, errGUI = pcall(function()
         Range = {1, 200}, Increment = 5,
         CurrentValue = math.clamp(tonumber(CFG.ApocDamage) or 100, 1, 200),
         Callback = function(v) CFG.ApocDamage = v end })
+
+    C:CreateSection("NEW: guillotine / vortex / wanted / thrones / ash")
+    C:CreateButton({ Name = "GUILLOTINE: push target into Death Part",
+        Callback = function() G.PE.Guillotine() end })
+    C:CreateButton({ Name = "VORTEX: pull everyone TO ME",
+        Callback = function() G.PE.Vortex("me") end })
+    C:CreateButton({ Name = "VORTEX: pull into Death Part",
+        Callback = function() G.PE.Vortex("death") end })
+    C:CreateButton({ Name = "VORTEX: pull into Escape zone",
+        Callback = function() G.PE.Vortex("escape") end })
+    C:CreateButton({ Name = "WANTED: clear my criminal status",
+        Callback = function() G.PE.Wanted(true) end })
+    C:CreateButton({ Name = "WANTED: mark target as criminal",
+        Callback = function() G.PE.Wanted(false) end })
+    C:CreateButton({ Name = "THRONE: nearest invisible seat",
+        Callback = function() G.PE.Throne("near") end })
+    C:CreateButton({ Name = "THRONE: highest invisible seat",
+        Callback = function() G.PE.Throne("top") end })
+    C:CreateButton({ Name = "THRONE: back to ground",
+        Callback = function() G.PE.Throne("back") end })
+    C:CreateButton({ Name = "REVENGE: tp to last attacker + burst",
+        Callback = function() G.PE.Revenge() end })
+    C:CreateToggle({ Name = "ASH: auto-clean when admin joins",
+        Flag = "PE_AshAuto",
+        CurrentValue = CFG.AshAuto ~= false,
+        Callback = function(v) CFG.AshAuto = v end })
+    C:CreateButton({ Name = "ASH: panic clean NOW (soft)",
+        Callback = function() G.PE.Ash("soft") end })
+    C:CreateButton({ Name = "ASH: panic + hide in Lobby (hard)",
+        Callback = function() G.PE.Ash("hard") end })
+    C:CreateButton({ Name = "ASH: RE-ARM after panic",
+        Callback = function() G.PE.Rearm() end })
 
     C:CreateSection("Team & status")
     C:CreateButton({ Name = "Team: GUARD",
