@@ -2222,6 +2222,15 @@ G.PE.Ghost = function(on)
     end
 end
 
+-- v2.67: ПОБЕГ ОТ ЧИТЕРА. Против InflictTarget без проверки дистанции
+-- защиты нет (урон ставит сервер), поэтому единственный реальный выход —
+-- уйти на другой сервер: телепорт уносит тебя туда, где читера нет.
+G.PE.ServerHop = function()
+    print("[PE HOP] leaving this server (anti-cheat escape)...")
+    local TS = game:GetService("TeleportService")
+    pcall(function() TS:Teleport(game.PlaceId, LP) end)
+end
+
 G.PE.Rearm = function()
     CFG._panic = nil
     print("[PE ASH] re-arm: features may be enabled again")
@@ -3218,6 +3227,11 @@ local function auraTick()
                     retTarget = atk
                     retUntil = now + 1.5
                     CFG._lastAtk = atk
+                    if CFG.AutoHop
+                       and now - (CFG._hopAt or 0) > 25 then
+                        CFG._hopAt = now
+                        task.spawn(function() G.PE.ServerHop() end)
+                    end
                     print("[PE RET] attacker: " .. atk.Name .. " -> BURN")
                 end
             end
@@ -4599,6 +4613,15 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_Ghost",
         CurrentValue = false,
         Callback = function(v) G.PE.Ghost(v) end })
+    C:CreateToggle({ Name = "AUTO-HOP: leave server when a cheater hits you",
+        Flag = "PE_AutoHop",
+        CurrentValue = CFG.AutoHop == true,
+        Callback = function(v)
+            CFG.AutoHop = v
+            print("[PE HOP] auto-hop " .. (v and "ON" or "OFF"))
+        end })
+    C:CreateButton({ Name = "HOP NOW (switch server)",
+        Callback = function() G.PE.ServerHop() end })
     C:CreateToggle({ Name = "AUTO-GUILLOTINE (push nearest into Death Part)",
         Flag = "PE_AutoGuillotine",
         CurrentValue = CFG.AutoGuillotine == true,
