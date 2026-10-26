@@ -2115,14 +2115,24 @@ end
 -- ПЕПЕЛ: паник-очистка. Скрипт остаётся, но спит (CFG._panic).
 G.PE.Ash = function(mode)
     CFG._panic = true
+    -- v2.61: НЕ зовём VIS.destroy — он обнуляет vpool, а VIS.update继续
+    -- индексирует его → ошибка каждый кадр (ESP отваливался до рестарта).
     for _, k in ipairs({ "KillAura", "Apocalypse", "C00lMode", "FirePaint",
         "AutoGive", "Immortal", "AuraFling", "Retr", "GunFire",
-        "ShotRadar", "Chams" }) do
+        "ShotRadar", "Chams", "Noclip", "Fly", "InfJump", "SpeedHack",
+        "JumpBoost", "AntiStun", "ModGunAuto", "Items", "DangerESP",
+        "InvisWall", "Skeleton", "HealthBars", "HeadBox", "Snaplines",
+        "OffArrows", "GroundRing", "Minimap", "Boxes", "MoveVec" }) do
         CFG[k] = false
     end
-    pcall(VIS.destroy)
-    for _, h in pairs(byItems) do pcall(function() h:Destroy() end) end
-    for _, h in pairs(byDanger) do pcall(function() h:Destroy() end) end
+    CFG._throneHome = nil
+    CFG._immBack = nil
+    pcall(function()
+        for _, h in pairs(byItems) do h:Destroy() end
+    end)
+    pcall(function()
+        for _, h in pairs(byDanger) do h:Destroy() end
+    end)
     if mode == "hard" then
         local _, _, root = peChar(LP)
         if root then
@@ -3081,6 +3091,9 @@ end
 
 local function auraTick()
     if not PE_GUI_READY then return end
+    -- v2.61: паника (ASH) глушит ВСЮ боевую петлю, а не только флаги в GUI:
+    -- иначе анти-стан, ноклип и аура продолжали работать при админе.
+    if CFG._panic then return end
     local now = os.clock()
 
     -- РЕТРИБУЦИЯ: нас ударили/подстрелили — вычисляем атакующего
