@@ -3047,6 +3047,32 @@ local function auraTick()
     -- единственный подтверждённый рабочий способ лечения. Против
     -- ваншотов (100+ за пакет) спасает только убийство атакующего
     -- первым — выбери его ник в «Who to hit».
+    -- v2.55: ПАНИКА НА НИЗКОМ HP. Полного годмода нет (Health считает
+    -- сервер), поэтому бессмертие = не дать добить: HP < 35% — уходим на
+    -- 350 стадов вверх, якоримся, лечимся вампиризмом, через 2.5 с назад.
+    if CFG._immPerch and (not CFG.Immortal or now > (CFG._immUntil or 0)) then
+        CFG._immPerch = nil
+        local rootR2 = LP.Character
+            and LP.Character:FindFirstChild("HumanoidRootPart")
+        if rootR2 then pcall(function() rootR2.Anchored = false end) end
+        print("[PE IMM] perch released")
+    end
+    if CFG.Immortal and not CFG._immPerch then
+        local chrP = LP.Character
+        local humP = chrP and chrP:FindFirstChildOfClass("Humanoid")
+        local rootP = chrP and chrP:FindFirstChild("HumanoidRootPart")
+        if humP and rootP and humP.MaxHealth > 0
+           and humP.Health / humP.MaxHealth < 0.35 then
+            CFG._immPerch = rootP.CFrame + Vector3.new(0, 350, 0)
+            CFG._immUntil = now + 2.5
+            pcall(function()
+                rootP.Anchored = true
+                rootP.CFrame = CFG._immPerch
+            end)
+            print("[PE IMM] HP " .. math.floor(humP.Health)
+                .. " - perch escape for 2.5s")
+        end
+    end
     if CFG.Immortal then
         local chrI = LP.Character
         local humI = chrI and chrI:FindFirstChildOfClass("Humanoid")
@@ -3925,7 +3951,15 @@ local okGUI, errGUI = pcall(function()
     C:CreateToggle({ Name = "Immortality (self-heal loop, 0 dmg)",
         Flag = "PE_Immortal",
         CurrentValue = CFG.Immortal == true,
-        Callback = function(v) CFG.Immortal = v end })
+        Callback = function(v)
+            CFG.Immortal = v
+            -- v2.55: смерть неизбежна (Health серверный) — не даём ей
+            -- стоить времени: мгновенный респавн + сторож оружия.
+            if v then
+                CFG.FastRespawn = true
+                print("[PE IMM] panic-perch + fast respawn engaged")
+            end
+        end })
 
     C:CreateSection("Gun upgrade")
     C:CreateParagraph({ Title = "Upgrade",
@@ -4566,6 +4600,14 @@ G.PE_Stop = function()
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     G.PE.FakeShot = nil
     G.PE.WP_Save, G.PE.WP_TP, G.PE.TPCrosshair = nil, nil, nil
+    pcall(function()
+        if CFG._immPerch then
+            CFG._immPerch = nil
+            local rImm = LP.Character
+                and LP.Character:FindFirstChild("HumanoidRootPart")
+            if rImm then rImm.Anchored = false end
+        end
+    end)
     if type(G.PE.FPSBoost) == "function" then
         pcall(function() G.PE.FPSBoost(false) end)
     end
