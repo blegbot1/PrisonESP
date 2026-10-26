@@ -1369,19 +1369,13 @@ end)
 -- АВТО-ГИВЕР: после респавна сам выдаём выбранное оружие (если сервер
 -- не выдал ничего сам).
 local giveConn = LP.CharacterAdded:Connect(function()
-    if STOPPED or not CFG.AutoGive then return end
-    task.wait(1.5)
-    if STOPPED or not CFG.AutoGive then return end
-    local chr = LP.Character
-    if not chr then return end
-    if chr:FindFirstChildOfClass("Tool") then return end
-    if CFG.AutoGiveName == "GIVE ALL" then
-        G.PE.GiveAll()
-    else
-        G.PE.Give(CFG.AutoGiveName)
-    end
-    print("[PE GIVE] auto-gave " .. tostring(CFG.AutoGiveName)
-        .. " after respawn")
+    task.spawn(function()
+        task.wait(1.5)
+        if STOPPED or not CFG.AutoGive then return end
+        if type(G.PE.EnsureWeapon) == "function" then
+            G.PE.EnsureWeapon("after respawn")
+        end
+    end)
 end)
 
 -- АНТИ-АФК: VirtualUser дёргает контроллер при idle-событии —
@@ -2153,6 +2147,54 @@ G.PE.GiveAll = function()
     print("[PE GIVE] items given: " .. n)
 end
 
+-- v2.54: ПОСТОЯННАЯ ПРОВЕРКА ОРУЖИЯ. Раньше авто-гивер срабатывал
+-- только на CharacterAdded: выбили пушку наручниками/смертью/сменой
+-- команды — скрипт этого не видел и молчал.
+G.PE.HasWeapon = function(name)
+    name = tostring(name or "")
+    if name == "" then return false end
+    local chr = LP.Character
+    local bp = LP:FindFirstChild("Backpack")
+    local function scan(root)
+        if not root then return false end
+        for _, o in ipairs(root:GetChildren()) do
+            if o:IsA("Tool") and o.Name == name then return true end
+        end
+        return false
+    end
+    return scan(chr) or scan(bp)
+end
+
+-- Какое оружие нужно апокалипсису: "GIVE ALL" — не пушка, берём M9.
+G.PE.ApocGunName = function()
+    local n = tostring(CFG.AutoGiveName or "M9")
+    if n == "" or n == "GIVE ALL" then return "M9" end
+    return n
+end
+
+G.PE.EnsureWeapon = function(tag)
+    if STOPPED or not CFG.AutoGive then return false end
+    local want = tostring(CFG.AutoGiveName or "M9")
+    if want == "" then return false end
+    if want ~= "GIVE ALL" and G.PE.HasWeapon(want) then
+        CFG._ensureOk = true
+        return true
+    end
+    local nowE = os.clock()
+    if CFG._ensureBusy or nowE - (CFG._ensureGiveAt or 0) < 4 then
+        return false
+    end
+    CFG._ensureGiveAt = nowE
+    CFG._ensureBusy = true
+    print("[PE GIVE] '" .. want .. "' NOT in inventory ("
+        .. tostring(tag or "") .. ") - giving")
+    task.spawn(function()
+        if want == "GIVE ALL" then G.PE.GiveAll() else G.PE.Give(want) end
+        CFG._ensureBusy = nil
+    end)
+    return false
+end
+
 -- Открыть ВСЕ двери (включая камеры): Doorscript'ы на клик-детекторах.
 -- ЗАМЕНА ТЕКСТУР удалена (v2.37) по запросу.
 
@@ -2715,6 +2757,16 @@ local function auraTick()
         end
     end
 
+    -- v2.54: СТОРОЖ ОРУЖИЯ. Раз в 3 с проверяем, что выбранная пушка
+    -- реально лежит в руках/рюкзаке; нет — выдаём заново (троттл 4 с
+    -- внутри EnsureWeapon). Работает и в бою, и в Апокалипсисе.
+    if CFG.AutoGive and now - (CFG._ensureAt or 0) >= 3 then
+        CFG._ensureAt = now
+        if type(G.PE.EnsureWeapon) == "function" then
+            G.PE.EnsureWeapon("watchdog")
+        end
+    end
+
     -- АВТО-ПРОКАЧКА: пушка без метки в руках — апгрейдим сразу.
     if CFG.ModGunAuto ~= false and now - modAt >= 1 then
         modAt = now
@@ -2909,14 +2961,22 @@ local function auraTick()
             -- кэшируется на 0.5с: myGunRemote каждый кадр дорог.
             if not CFG._apocGunAt or now - CFG._apocGunAt >= 0.5 then
                 CFG._apocGunAt = now
-                CFG._apocHasGun = myGunRemote("InflictTarget") ~= nil
+                -- v2.54: нужна именно ЗАДАННАЯ пушка (её выдаёт авто-гивер),
+                -- а не любая с InflictTarget: без неё апокалипсис молча
+                -- стоял на вышке и ничего не делал.
+                local want = G.PE.ApocGunName()
+                CFG._apocWant = want
+                CFG._apocHasGun = G.PE.HasWeapon(want)
+                    and myGunRemote("InflictTarget") ~= nil
             end
             local hasGun = CFG._apocHasGun
             if not hasGun then
                 if not CFG._apocGiveAt
-                   or os.clock() - CFG._apocGiveAt > 8 then
+                   or os.clock() - CFG._apocGiveAt > 4 then
                     CFG._apocGiveAt = os.clock()
-                    G.PE.Give("M9")
+                    if type(G.PE.EnsureWeapon) == "function" then
+                        G.PE.EnsureWeapon("apocalypse")
+                    end
                 end
             else
                 -- Вышка + пушка на месте: можно воевать.
