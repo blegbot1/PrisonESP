@@ -2579,6 +2579,7 @@ G.PE.Give = function(itemName)
                 local origCF = root and root.CFrame
                 local teleported = false
                 if root and part and origCF and not CFG._giveNoFly
+                   and not CFG.Apocalypse and not root.Anchored
                    and (part.Position - root.Position).Magnitude > 60 then
                     root.CFrame = part.CFrame + Vector3.new(0, 4, 0)
                     teleported = true
@@ -2667,7 +2668,11 @@ G.PE.EnsureWeapon = function(tag)
         if haveAll then CFG._ensureOk = true return true end
     end
     local nowE = os.clock()
-    if CFG._ensureBusy or nowE - (CFG._ensureGiveAt or 0) < 4 then
+    -- v2.70: под апокалипсисом гивер не может выдать пушку (тим-чек), а
+    -- ретрай каждые 4 с телепортировал игрока к модели и обратно — играть
+    -- было невозможно. Теперь редкий ретрай и без телепорта.
+    local gap = CFG.Apocalypse and 15 or 4
+    if CFG._ensureBusy or nowE - (CFG._ensureGiveAt or 0) < gap then
         return false
     end
     CFG._ensureGiveAt = nowE
