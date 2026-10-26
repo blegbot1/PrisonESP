@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.77  (Combat-only: точная атрибуция атакующего)
+--  PRISON ESP  v2.78  (Combat-only: PeUI + фон-фото)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1929,6 +1929,63 @@ do
         corner(12, root)
         stroke(THEME.Stroke, 1, root)
 
+        -- ФОН-ФОТО: pe_bg.png из workspace исполнителя через
+        -- getcustomasset, либо декал getgenv().PE_BG_ID = "rbxassetid://N".
+        -- Поверх фото — затемнение, чтобы текст читался.
+        do
+            local bgSrc = nil
+            if type(getcustomasset) == "function"
+               and type(isfile) == "function" then
+                pcall(function()
+                    for _, name in ipairs({
+                        "pe_bg.png", "pe_bg.jpg", "pe_bg.jpeg" }) do
+                        if isfile(name) then
+                            local okA, asset = pcall(function()
+                                return getcustomasset({ filepath = name })
+                            end)
+                            if not okA or not asset then
+                                okA, asset = pcall(function()
+                                    return getcustomasset(name)
+                                end)
+                            end
+                            if okA and type(asset) == "string" then
+                                bgSrc = asset
+                            end
+                            break
+                        end
+                    end
+                end)
+            end
+            if not bgSrc then
+                local manual = getgenv().PE_BG_ID
+                if type(manual) == "number" and manual > 0 then
+                    bgSrc = "rbxassetid://" .. manual
+                elseif type(manual) == "string" and manual ~= "" then
+                    bgSrc = manual
+                end
+            end
+            if bgSrc then
+                mk("ImageLabel", {
+                    Name = "BgPhoto",
+                    Size = UDim2.new(1, 0, 1, 0),
+                    BackgroundTransparency = 1,
+                    Image = bgSrc,
+                    ImageTransparency = 0.15,
+                    ScaleType = Enum.ScaleType.Fit,
+                    BorderSizePixel = 0,
+                    ZIndex = 0,
+                }, root)
+                mk("Frame", {
+                    Name = "BgDim",
+                    Size = UDim2.new(1, 0, 1, 0),
+                    BackgroundColor3 = Color3.fromRGB(10, 6, 18),
+                    BackgroundTransparency = 0.4,
+                    BorderSizePixel = 0,
+                    ZIndex = 0,
+                }, root)
+            end
+        end
+
         -- Топбар: заголовок + свернуть, им же таскаем окно.
         local top = mk("Frame", {
             Size = UDim2.new(1, 0, 0, 38),
@@ -3170,7 +3227,7 @@ local okGUI, errGUI = pcall(function()
             end })
         ST:CreateSection("Info")
         ST:CreateParagraph({ Title = "Version",
-            Content = "PRISON ESP v2.75 (Combat-only, built-in PeUI). Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "PRISON ESP v2.78 (Combat-only, built-in PeUI). Background photo: put pe_bg.png into the executor workspace (auto via getcustomasset), or set getgenv().PE_BG_ID = decal id. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
@@ -3403,9 +3460,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.77 stopped")
+    print("[PE] v2.78 stopped")
 end
 
-print("[PE] v2.77 started (Combat-only, PeUI built-in)"
+print("[PE] v2.78 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
