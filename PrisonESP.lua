@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v3.03  (Combat-only: PeUI + фото-фон с настройкой размера)
+--  PRISON ESP  v3.04  (Combat-only: PeUI + зафиксированный фото-фон)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2480,9 +2480,9 @@ do
                     AnchorPoint = Vector2.new(0.5, 0.5),
                     Position = UDim2.new(0.5, 0, 0.5, 0),
                     Size = UDim2.new(
-                        math.clamp(tonumber(CFG.BgWidth) or 0.55, 0.1, 4),
+                        math.clamp(tonumber(CFG.BgWidth) or 1.05, 0.1, 4),
                         0,
-                        math.clamp(tonumber(CFG.BgHeight) or 0.75, 0.1, 4),
+                        math.clamp(tonumber(CFG.BgHeight) or 0.7, 0.1, 4),
                         0),
                     BackgroundTransparency = 1,
                     Image = "",
@@ -3810,35 +3810,6 @@ local okGUI, errGUI = pcall(function()
                 local stop = G.PE_Stop
                 if stop then stop() end
             end })
-        ST:CreateSection("Photo size (width / height)")
-        ST:CreateSlider({ Name = "Photo width", Flag = "PE_BgWidth",
-            Range = {0.1, 4}, Increment = 0.05,
-            CurrentValue = math.clamp(tonumber(CFG.BgWidth) or 0.55, 0.1, 4),
-            Suffix = " x",
-            Callback = function(v)
-                CFG.BgWidth = v
-                if PeUI and PeUI._bgImage then
-                    pcall(function()
-                        PeUI._bgImage.Size = UDim2.new(v, 0,
-                            math.clamp(tonumber(CFG.BgHeight) or 0.75,
-                                0.1, 4), 0)
-                    end)
-                end
-            end })
-        ST:CreateSlider({ Name = "Photo height", Flag = "PE_BgHeight",
-            Range = {0.1, 4}, Increment = 0.05,
-            CurrentValue = math.clamp(tonumber(CFG.BgHeight) or 0.75, 0.1, 4),
-            Suffix = " x",
-            Callback = function(v)
-                CFG.BgHeight = v
-                if PeUI and PeUI._bgImage then
-                    pcall(function()
-                        PeUI._bgImage.Size = UDim2.new(
-                            math.clamp(tonumber(CFG.BgWidth) or 0.55,
-                                0.1, 4), 0, v, 0)
-                    end)
-                end
-            end })
         ST:CreateSection("Info")
         ST:CreateInput({ Name = "Photo decal ID (background)",
             PlaceholderText = "decal id from roblox.com, e.g. 123456789",
@@ -4104,9 +4075,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v3.03 stopped")
+    print("[PE] v3.04 stopped")
 end
 
-print("[PE] v3.03 started (Combat-only, PeUI built-in)"
+print("[PE] v3.04 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
