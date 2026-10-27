@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.87  (Combat-only: PeUI + admin theatre full)
+--  PRISON ESP  v2.88  (Combat-only: PeUI + admin theatre full)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -653,7 +653,13 @@ G.PE.EnsureWeapon = function(tag)
             if want == "GIVE ALL" then G.PE.GiveAll() else G.PE.Give(want) end
         end)
         CFG._ensureBusy = nil
-        if not okE then warn("[PE GIVE] ensure failed: " .. tostring(errE)) end
+        -- Неудача выдачи (модель забрали с земли / нет ClickDetector):
+        -- откладываем следующий ретрай на 12с, иначе сторож спамит
+        -- попытками каждые 4с, когда пушек на карте просто нет.
+        if not okE then
+            CFG._ensureGiveAt = os.clock() + 8
+            warn("[PE GIVE] ensure failed: " .. tostring(errE))
+        end
     end)
     return false
 end
@@ -1420,6 +1426,7 @@ local retAt = 0
 local PE_LAST_HP = -1
 local PE_HIT_AT = 0
 local retTarget, retUntil = nil, 0
+local retPrinted = nil -- имя уже напечатанного атакующего (антиспам)
 
 -- КТО СТРЕЛЯЛ: сервер ретранслирует ВСЕ трассеры (VisualizeBullet)
 -- каждому клиенту. Слушаем их тихо (без отрисовки) и запоминаем,
@@ -1534,7 +1541,12 @@ local function auraTick()
                 if atk then
                     retTarget = atk
                     retUntil = now + 1.5
-                    print("[PE RET] attacker: " .. atk.Name .. " -> BURN")
+                    -- Печатаем только смену атакующего: при непрерывном
+                    -- огне по нам строка дублировалась 10+ раз подряд.
+                    if retPrinted ~= atk.Name then
+                        retPrinted = atk.Name
+                        print("[PE RET] attacker: " .. atk.Name .. " -> BURN")
+                    end
                 end
             end
             PE_LAST_HP = hp
@@ -4115,9 +4127,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.87 stopped")
+    print("[PE] v2.88 stopped")
 end
 
-print("[PE] v2.87 started (Combat-only, PeUI built-in)"
+print("[PE] v2.88 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
