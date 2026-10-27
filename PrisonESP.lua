@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.98  (Combat-only: PeUI + PNG фон, человечек растянут)
+--  PRISON ESP  v2.99  (Combat-only: PeUI + PNG фон по центру)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2475,29 +2475,18 @@ do
                 -- парентинга; ZIndex обычные (0 ломал отрисовку);
                 -- EditableImage-попытка УДАЛЕНА — она перезаписывала
                 -- рабочий Image пустым Content'ом.
-                local panel = mk("Frame", {
-                    Name = "BgPhotoPanel",
-                    AnchorPoint = Vector2.new(1, 0),
-                    Position = UDim2.new(1, 0, 0, 0),
-                    Size = UDim2.new(0.6, 0, 1, 0),
-                    -- Подложка = цвет окна: края невидимы, остаётся
-                    -- только сам персонаж (фит по панели).
-                    BackgroundColor3 = Color3.fromRGB(17, 11, 28),
-                    BackgroundTransparency = 0,
-                    BorderSizePixel = 0,
-                }, root)
-                corner(10, panel)
                 local bgImage = mk("ImageLabel", {
                     Name = "BgPhoto",
                     Size = UDim2.new(1, 0, 1, 0),
                     BackgroundTransparency = 1,
                     Image = "",
                     ImageTransparency = 0,
-                    -- Растягиваем САМОГО человечка на всю панель.
-                    ScaleType = Enum.ScaleType.Stretch,
+                    -- РАВНОМЕРНО и ПО ЦЕНТРУ окна: Fit масштабирует
+                    -- человечка максимально крупно без искажений
+                    -- и центрирует его.
+                    ScaleType = Enum.ScaleType.Fit,
                     BorderSizePixel = 0,
-                }, panel)
-                PeUI._bgPanel = panel
+                }, root)
                 PeUI._bgImage = bgImage
                 -- Ассет присваиваем ПОСЛЕ парентинга (как в тесте, где
                 -- фото рендерилось), с задержкой на строкновение GUI.
@@ -4081,9 +4070,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.98 stopped")
+    print("[PE] v2.99 stopped")
 end
 
-print("[PE] v2.98 started (Combat-only, PeUI built-in)"
+print("[PE] v2.99 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
