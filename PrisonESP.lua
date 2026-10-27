@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.78  (Combat-only: PeUI + фон-фото)
+--  PRISON ESP  v2.81  (Combat-only: PeUI + фон-фото + sky strike)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1030,6 +1030,80 @@ G.PE.FakeShot = function(atSel)
     print("[PE FAKE] tracer sent -> " .. tostring(target))
 end
 
+-- SKY SHOT: театральный «админ-страйк». Трассер рисуется ОТ ХЭНДЛА
+-- нашей пушки (сервер ретранслирует как есть), поэтому «с неба»
+-- стреляем по-честному: телепорт вверх на 0.4с → залп из 3 трассеров
+-- вниз по цели → возврат. Со стороны: вы телепортировались в небо,
+-- расстреляли цель и исчезли. Урона нет, палево есть — фича-театр.
+G.PE.SkyShot = function(namePart)
+    local nowS = os.clock()
+    if nowS - (G._skyAt or 0) < 6 then
+        print("[PE SKY] cooldown (" ..
+            string.format("%.1f", 6 - (nowS - (G._skyAt or 0))) .. "s)")
+        return
+    end
+    local chr = LP.Character
+    local rootS = chr and chr:FindFirstChild("HumanoidRootPart")
+    if not rootS then print("[PE SKY] no character") return end
+    local tool = chr:FindFirstChildOfClass("Tool")
+    if not tool then
+        print("[PE SKY] take any gun in hands (relay source)")
+        return
+    end
+    local gsl = tool:FindFirstChild("GunScript_Local")
+    local vb = tool:FindFirstChild("VisualizeBullet")
+    local handle = tool:FindFirstChild("Handle")
+    if not (gsl and vb and handle) then
+        print("[PE SKY] " .. tool.Name .. " has no VisualizeBullet")
+        return
+    end
+    local target = nil
+    if namePart then
+        local p = findPlayer(tostring(namePart))
+        local headF = p and p.Character
+            and p.Character:FindFirstChild("Head")
+        if headF then target = headF.Position end
+    end
+    if not target then
+        local m = LP:GetMouse()
+        target = m and m.Hit and m.Hit.Position
+    end
+    if not target then
+        print("[PE SKY] no target position")
+        return
+    end
+    local homeCF = rootS.CFrame
+    G._skyAt = nowS
+    task.spawn(function()
+        pcall(function()
+            rootS.CFrame = CFrame.new(target
+                + Vector3.new(math.random(-10, 10), 160,
+                    math.random(-10, 10)))
+        end)
+        for _ = 1, 3 do
+            pcall(function()
+                vb:FireServer(handle, Vector3.new(0, 0.625, 1.25),
+                    target,
+                    gsl:FindFirstChild("MuzzleEffect"),
+                    gsl:FindFirstChild("HitEffect"),
+                    186809061,
+                    { false, 8, 0 },
+                    { 25, Vector3.new(0.25, 0.25, 140),
+                        BrickColor.new("Bright yellow").Color, 0.2,
+                        Enum.Material.Neon, 0.2 },
+                    true, false)
+            end)
+            task.wait(0.12)
+        end
+        pcall(function()
+            local rB = LP.Character
+                and LP.Character:FindFirstChild("HumanoidRootPart")
+            if rB then rB.CFrame = homeCF end
+        end)
+    end)
+    print("[PE SKY] sky strike -> " .. tostring(target))
+end
+
 -- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
 -- с какими аргументами игра честно стреляет InflictTarget.
 G.PE.GunSource = function()
@@ -1069,7 +1143,9 @@ G.PE.GunSource = function()
 end
 
 -- Цель: «Everyone» или ник конкретного игрока (списки с игроками).
+-- Тим-фильтр: сервер урон по тиммейтам режет — не тратить слоты.
 local function targetAllowed(p, sel, myTeam)
+    if myTeam and p.Team == myTeam then return false end
     if sel == nil or sel == "" or sel == "Everyone" then return true end
     return p.Name == sel or p.DisplayName == sel
 end
@@ -1093,6 +1169,7 @@ local retTarget, retUntil = nil, 0
 -- невиновных рядом, пока дальний стрелок оставался цел).
 local recentShots = setmetatable({}, { __mode = "k" })
 local hookedVB = setmetatable({}, { __mode = "k" })
+local vbConns = {} -- сильные ссылки: PE_Stop дисконнектит всё
 local SHOT_MEMORY = 3 -- секунды
 
 local function hookShotRemotes()
@@ -1101,9 +1178,8 @@ local function hookShotRemotes()
         for _, d in ipairs(cont:GetDescendants()) do
             if d:IsA("RemoteEvent") and d.Name == "VisualizeBullet"
                and not hookedVB[d] then
-                hookedVB[d] = true
-                pcall(function()
-                    d.OnClientEvent:Connect(function(handle)
+                local okC, conn = pcall(function()
+                    return d.OnClientEvent:Connect(function(handle)
                         if typeof(handle) ~= "Instance" then return end
                         local tool = handle:FindFirstAncestorOfClass("Tool")
                         local plr = tool
@@ -1113,6 +1189,11 @@ local function hookShotRemotes()
                         end
                     end)
                 end)
+                -- Флаг ПОСЛЕ успешного коннекта: упавший = не помечен.
+                if okC and conn then
+                    hookedVB[d] = true
+                    vbConns[#vbConns + 1] = conn
+                end
             end
         end
     end
@@ -1124,25 +1205,32 @@ task.spawn(function()
     end
 end)
 
--- Последний стрелок за окно памяти (или nil, если никто не стрелял).
+-- Последний стрелок за окно памяти (plr, время выстрела) или nil.
+-- Тиммейты пропускаются, пока нет обхода (сервер их урон режет —
+-- лочить retTarget на них впустую).
 local function lastShooter()
     local now = os.clock()
+    local noFilter = CFG.AuraTeamBypass or CFG.Apocalypse
     local bestP, bestT
     for p, t in pairs(recentShots) do
         if now - t > SHOT_MEMORY then
             recentShots[p] = nil
         elseif p.Parent and (not bestT or t > bestT) then
-            bestP, bestT = p, t
+            if noFilter or p.Team ~= LP.Team then
+                bestP, bestT = p, t
+            end
         end
     end
-    return bestP
+    return bestP, bestT
 end
 
--- Поиск атакующего: сначала точная атрибуция по недавним выстрелам,
--- фолбэк — старая эвристика (ближайший, вооружённые −30 стадов).
+-- Поиск атакующего: сначала точная атрибуция по недавним выстрелам
+-- (окно стыковки «выстрел → просадка HP» всего 1с — перекрёстный огонь
+-- и чужие фейк-трассеры не должны стать «атакующим»), фолбэк —
+-- старая эвристика (ближайший, вооружённые −30 стадов).
 local function findAttacker(myRoot)
-    local shooter = lastShooter()
-    if shooter then
+    local shooter, shotAt = lastShooter()
+    if shooter and os.clock() - shotAt <= 1 then
         local ch = shooter.Character
         local hum = ch and ch:FindFirstChildOfClass("Humanoid")
         if hum and hum.Health > 0 then
@@ -1314,6 +1402,10 @@ local function auraTick()
                     rootA.Anchored = true
                     rootA.CFrame = CFG._apocPerchCF
                 end)
+                -- Троттл re-perch: раньше _giveFlyAt ставился только
+                -- в флай-ине гивера (под APOC отключён) — якорь дёргался
+                -- каждый Heartbeat в окне «не перчед».
+                CFG._giveFlyAt = os.clock()
             end
             -- Оружие: после респавна выпало — берём заново (первая
             -- выдача сразу, без 8-секундной отсрочки). Проверка пушки
@@ -1362,7 +1454,7 @@ local function auraTick()
                             tonumber(CFG.ApocDamage) or 100, 1, 200)
                         local hitsA = 0
                         for _, p2 in ipairs(Players:GetPlayers()) do
-                            if p2 ~= LP and hitsA < 20 then
+                            if p2 ~= LP and p2.Team ~= LP.Team and hitsA < 20 then
                                 local ch2 = p2.Character
                                 local h2 = ch2
                                     and ch2:FindFirstChildOfClass("Humanoid")
@@ -1430,11 +1522,12 @@ local function auraTick()
         print("[PE IMM] perch released")
     end
     if CFG.Immortal and not CFG._immPerch
+       and not CFG.Apocalypse
        and now > (CFG._immCool or 0) then
         local chrP = LP.Character
         local humP = chrP and chrP:FindFirstChildOfClass("Humanoid")
         local rootP = chrP and chrP:FindFirstChild("HumanoidRootPart")
-        if humP and rootP and humP.MaxHealth > 0
+        if humP and rootP and humP.Health > 0 and humP.MaxHealth > 0
            and humP.Health / humP.MaxHealth < 0.35 then
             CFG._immPerch = rootP.CFrame + Vector3.new(0, 350, 0)
             CFG._immBack = rootP.CFrame
@@ -1792,6 +1885,15 @@ do
     end
 
     local function keep(c)
+        -- Компакция: мёртвые (отвалившиеся инстансы) коннекты выкидываем,
+        -- иначе таблица растёт монотонно всю сессию.
+        if #PeUI._conns > 400 then
+            local alive = {}
+            for _, old in ipairs(PeUI._conns) do
+                if old.Connected then alive[#alive + 1] = old end
+            end
+            PeUI._conns = alive
+        end
         PeUI._conns[#PeUI._conns + 1] = c
         return c
     end
@@ -1959,39 +2061,67 @@ do
         stroke(THEME.Stroke, 1, root)
 
         -- ФОН-ФОТО: pe_bg.png из workspace исполнителя через
-        -- getcustomasset, либо декал getgenv().PE_BG_ID = "rbxassetid://N".
-        -- Поверх фото — затемнение, чтобы текст читался.
+        -- getcustomasset, качаем с GitHub если нет, либо декал
+        -- getgenv().PE_BG_ID. Каждый шаг печатаем в консоль —
+        -- чтобы «фото не грузится» диагностировалось с первого раза.
         do
             local bgSrc = nil
+            local bgLog = function(step)
+                print("[PE UI] bg: " .. step)
+            end
+            if type(getcustomasset) ~= "function" then
+                bgLog("getcustomasset NOT supported by executor")
+            else
+                bgLog("getcustomasset present")
+            end
             if type(getcustomasset) == "function"
                and type(isfile) == "function" then
                 pcall(function()
                     for _, name in ipairs({
                         "pe_bg.png", "pe_bg.jpg", "pe_bg.jpeg" }) do
                         if isfile(name) then
+                            bgLog("local file found: " .. name)
                             local okA, asset = pcall(function()
                                 return getcustomasset({ filepath = name })
                             end)
                             if not okA or not asset then
+                                bgLog("table form failed, trying string form")
                                 okA, asset = pcall(function()
                                     return getcustomasset(name)
                                 end)
                             end
                             if okA and type(asset) == "string" then
                                 bgSrc = asset
+                                bgLog("custom asset OK")
+                            else
+                                bgLog("getcustomasset FAILED: "
+                                    .. tostring(asset))
                             end
                             break
                         end
                     end
+                    if not bgSrc then
+                        bgLog("no local pe_bg.* in workspace")
+                    end
                 end)
             end
             -- Локального файла нет — качаем с нашего GitHub и
-            -- подключаем тем же getcustomasset.
+            -- подключаем тем же getcustomasset (обе формы вызова).
             if not bgSrc and type(getcustomasset) == "function"
                and type(writefile) == "function"
                and type(isfile) == "function" then
                 pcall(function()
-                    if not isfile("pe_bg.png") then
+                    local need = true
+                    if isfile("pe_bg.png") then
+                        local okS, s = pcall(function()
+                            -- readfile может не быть — тогда считаем,
+                            -- что файл валиден и не перекачиваем.
+                            return readfile and readfile("pe_bg.png") or nil
+                        end)
+                        need = not (okS and type(s) == "string" and #s > 500)
+                    end
+                    if need then
+                        bgLog("downloading pe_bg.png from GitHub...")
                         local okD, data = pcall(function()
                             return game:HttpGet(
                                 "https://raw.githubusercontent.com/blegbot1/PrisonESP/main/pe_bg.png",
@@ -2000,14 +2130,28 @@ do
                         if okD and type(data) == "string"
                            and #data > 500 then
                             pcall(function() writefile("pe_bg.png", data) end)
+                            bgLog("downloaded " .. #data .. " bytes")
+                        else
+                            bgLog("GitHub download FAILED: "
+                                .. tostring(data))
                         end
                     end
                     if isfile("pe_bg.png") then
+                        bgLog("downloaded file present, building asset")
                         local okA, asset = pcall(function()
                             return getcustomasset({ filepath = "pe_bg.png" })
                         end)
+                        if not okA or not asset then
+                            okA, asset = pcall(function()
+                                return getcustomasset("pe_bg.png")
+                            end)
+                        end
                         if okA and type(asset) == "string" then
                             bgSrc = asset
+                            bgLog("custom asset OK (from GitHub copy)")
+                        else
+                            bgLog("getcustomasset FAILED: "
+                                .. tostring(asset))
                         end
                     end
                 end)
@@ -2016,8 +2160,12 @@ do
                 local manual = getgenv().PE_BG_ID
                 if type(manual) == "number" and manual > 0 then
                     bgSrc = "rbxassetid://" .. manual
+                    bgLog("using PE_BG_ID decal")
                 elseif type(manual) == "string" and manual ~= "" then
                     bgSrc = manual
+                    bgLog("using PE_BG_ID decal")
+                else
+                    bgLog("NO background source available")
                 end
             end
             if bgSrc then
@@ -2105,7 +2253,8 @@ do
             end
         end))
         keep(UIS.InputEnded:Connect(function(inp)
-            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            if inp.UserInputType == Enum.UserInputType.MouseButton1
+               or inp.UserInputType == Enum.UserInputType.Touch then
                 dragging = false
             end
         end))
@@ -2151,7 +2300,12 @@ do
                 activePopup = nil
                 tween(p, { BackgroundTransparency = 1 }, 0.12)
                 task.delay(0.13, function()
-                    pcall(function() p:Destroy() end)
+                    -- Гард: попап могли ПЕРЕОТКРЫТЬ (клик по строке)
+                    -- — тогда отложенный destroy убивал живой список
+                    -- и дропдаун ломался навсегда.
+                    if activePopup ~= p then
+                        pcall(function() p:Destroy() end)
+                    end
                 end)
             end
         end
@@ -2160,15 +2314,6 @@ do
             local p, s = inst.AbsolutePosition, inst.AbsoluteSize
             return x >= p.X and x <= p.X + s.X and y >= p.Y and y <= p.Y + s.Y
         end
-
-        keep(UIS.InputBegan:Connect(function(inp)
-            if activePopup and inp.UserInputType == Enum.UserInputType.MouseButton1 then
-                local m = UIS:GetMouseLocation()
-                if not inBounds(activePopup, m.X, m.Y) then
-                    closePopup()
-                end
-            end
-        end))
 
         local selectTab
         selectTab = function(p)
@@ -2402,6 +2547,7 @@ do
                 local hi = tonumber(data.Range and data.Range[2]) or 100
                 if hi <= lo then hi = lo + 1 end
                 local inc = tonumber(data.Increment) or 1
+                if inc <= 0 then inc = 1 end
                 local suffix = data.Suffix and (" " .. tostring(data.Suffix)) or ""
                 local function fmt(v)
                     return tostring(math.floor(v * 100 + 0.5) / 100) .. suffix
@@ -2583,7 +2729,21 @@ do
                 pad(popup, 5, 5, 5, 5)
 
                 local function rebuild(opts)
-                    el.Options = opts or {}
+                    -- Список не изменился — не пересобираем: иначе 5-секундный
+                    -- рефрешер мерцает открытым попапом, рвёт клики и копит
+                    -- мёртвые коннекты в _conns.
+                    local newOpts = opts or {}
+                    if #newOpts == #el.Options then
+                        local same = true
+                        for i, o in ipairs(newOpts) do
+                            if el.Options[i] ~= o then same = false break end
+                        end
+                        if same then
+                            refreshSelected()
+                            return
+                        end
+                    end
+                    el.Options = newOpts
                     el.CurrentOption = {}
                     for _, o in ipairs(data.CurrentOption or {}) do
                         if table.find(el.Options, o) then
@@ -2668,12 +2828,23 @@ do
                         return
                     end
                     closePopup()
+                    -- Открытие вверх, если попап не влезает вниз
+                    -- (root.ClipsDescendants резал нижние строки).
+                    local openDown = r.AbsolutePosition.Y
+                        - root.AbsolutePosition.Y + r.AbsoluteSize.Y + 174
+                        <= root.AbsoluteSize.Y
+                    local py
+                    if openDown then
+                        py = r.AbsolutePosition.Y - root.AbsolutePosition.Y
+                            + r.AbsoluteSize.Y + 4
+                    else
+                        py = r.AbsolutePosition.Y - root.AbsolutePosition.Y
+                            - popup.AbsoluteSize.Y - 4
+                    end
                     popup.Position = UDim2.new(0,
                         r.AbsolutePosition.X - root.AbsolutePosition.X
                             + r.AbsoluteSize.X - 254,
-                        0,
-                        r.AbsolutePosition.Y - root.AbsolutePosition.Y
-                            + r.AbsoluteSize.Y + 4)
+                        0, py)
                     popup.Visible = true
                     popup.BackgroundTransparency = 1
                     tween(popup, { BackgroundTransparency = 0 }, 0.12)
@@ -2755,7 +2926,9 @@ do
                 keep(box.FocusLost:Connect(function(enter)
                     el.CurrentValue = box.Text
                     safeCall(data.Callback, box.Text)
-                    if enter then queueSave() end
+                    -- Сохраняем и по Enter, и по потере фокуса: иначе
+                -- последняя правка пропадала при выгрузке.
+                queueSave()
                 end))
                 return el
             end
@@ -3088,6 +3261,13 @@ local okGUI, errGUI = pcall(function()
 
     C = safeNewTab(W, "CHAOS", "flame", "CHAOS")
     if not C then error("CHAOS tab failed") end
+    C:CreateSection("Admin theatre")
+    C:CreateParagraph({ Title = "Sky strike",
+        Content = "Theatrical 'admin strike': you blink into the sky above the target, 3 neon tracers rain down (EVERYONE sees them - server relay), you blink back. No damage, pure legend-building. 6s cooldown, needs any gun in hands." })
+    C:CreateButton({ Name = "SKY SHOT at cursor",
+        Callback = function() G.PE.SkyShot() end })
+    C:CreateButton({ Name = "SKY SHOT at selected player",
+        Callback = function() G.PE.SkyShot(CFG.KillAuraTeam) end })
     C:CreateSection("C00LKIDD MODE (2014)")
     C:CreateParagraph({ Title = "c00lkidd",
         Content = "Slow-burn EVERYONE: tiny damage every 1.2s + server fire - players burn and die slowly, visible to the whole server (needs a gun). The 2014 legend returns." })
@@ -3495,9 +3675,20 @@ G.PE_Stop = function()
             CFG._immPerch = nil
             local rImm = LP.Character
                 and LP.Character:FindFirstChild("HumanoidRootPart")
-            if rImm then rImm.Anchored = false end
+            if rImm then
+                -- Возвращаем на землю ДО снятия якоря: иначе падение
+                -- с +350 стадов и фолл-урон после самой выгрузки.
+                if CFG._immBack then
+                    rImm.CFrame = CFG._immBack
+                end
+                rImm.Anchored = false
+            end
         end
     end)
+    for _, c in ipairs(vbConns) do
+        pcall(function() c:Disconnect() end)
+    end
+    vbConns = {}
     -- FPS-буст удалён (v2.75): функция не существует.
     CFG._ensureBusy = nil
     pcall(function()
@@ -3516,9 +3707,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.78 stopped")
+    print("[PE] v2.81 stopped")
 end
 
-print("[PE] v2.78 started (Combat-only, PeUI built-in)"
+print("[PE] v2.81 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
