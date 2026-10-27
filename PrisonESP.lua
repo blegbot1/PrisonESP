@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v3.04  (Combat-only: PeUI + зафиксированный фото-фон)
+--  PRISON ESP  v3.05  (Combat-only: PeUI + фиксированный фон, без перча)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -230,11 +230,6 @@ end)
 -- АВТО-ГИВЕР: после респавна сам выдаём выбранное оружие (если сервер
 -- не выдал ничего сам).
 local giveConn = LP.CharacterAdded:Connect(function()
-    -- Респавн сбрасывает перч бессмертия: иначе новый персонаж
-    -- телепортируется в точку _immBack, где тебя только что убили.
-    CFG._immPerch = nil
-    CFG._immBack = nil
-    CFG._immUntil = nil
     task.spawn(function()
         task.wait(1.5)
         if STOPPED or not CFG.AutoGive then return end
@@ -1818,43 +1813,17 @@ local function auraTick()
     -- единственный подтверждённый рабочий способ лечения. Против
     -- ваншотов (100+ за пакет) спасает только убийство атакующего
     -- первым — выбери его ник в «Who to hit».
-    -- v2.55: ПАНИКА НА НИЗКОМ HP. Полного годмода нет (Health считает
-    -- сервер), поэтому бессмертие = не дать добить: HP < 35% — уходим на
-    -- 350 стадов вверх, якоримся, лечимся вампиризмом, через 2.5 с назад.
-    if CFG._immPerch and (not CFG.Immortal or now > (CFG._immUntil or 0)) then
+    -- v3.05: ПАНИК-ПЕРЧ УДАЛЁН по запросу — телепорта вверх при
+    -- низком HP больше нет. Бессмертие = только хил (вампир-тап).
+    -- Зачистка застревшего _immPerch/_immBack от старых сессий.
+    if CFG._immPerch or CFG._immBack then
         CFG._immPerch = nil
-        -- v2.57: возвращаем на точку ДО перча (раньше просто снимали якорь —
-        -- падение с +350), и ставим кулдаун, иначе в этом же тике HP всё
-        -- ещё <35% и перч ставился заново от уже высокой точки (набор высоты).
-        CFG._immCool = now + 1.5
+        CFG._immBack = nil
+        CFG._immUntil = nil
         local rootR2 = LP.Character
             and LP.Character:FindFirstChild("HumanoidRootPart")
         if rootR2 then
-            if CFG._immBack then
-                pcall(function() rootR2.CFrame = CFG._immBack end)
-            end
             pcall(function() rootR2.Anchored = false end)
-        end
-        CFG._immBack = nil
-        print("[PE IMM] perch released")
-    end
-    if CFG.Immortal and not CFG._immPerch
-       and not CFG.Apocalypse
-       and now > (CFG._immCool or 0) then
-        local chrP = LP.Character
-        local humP = chrP and chrP:FindFirstChildOfClass("Humanoid")
-        local rootP = chrP and chrP:FindFirstChild("HumanoidRootPart")
-        if humP and rootP and humP.Health > 0 and humP.MaxHealth > 0
-           and humP.Health / humP.MaxHealth < 0.35 then
-            CFG._immPerch = rootP.CFrame + Vector3.new(0, 350, 0)
-            CFG._immBack = rootP.CFrame
-            CFG._immUntil = now + 2.5
-            pcall(function()
-                rootP.Anchored = true
-                rootP.CFrame = CFG._immPerch
-            end)
-            print("[PE IMM] HP " .. math.floor(humP.Health)
-                .. " - perch escape for 2.5s")
         end
     end
     if CFG.Immortal then
@@ -3530,9 +3499,6 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.Immortal == true,
         Callback = function(v)
             CFG.Immortal = v
-            if v then
-                print("[PE IMM] panic-perch engaged")
-            end
         end })
     C:CreateToggle({ Name = "Aura team bypass (hit prisoners AND guards)",
         Flag = "PE_AuraTeamBypass",
@@ -4075,9 +4041,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v3.04 stopped")
+    print("[PE] v3.05 stopped")
 end
 
-print("[PE] v3.04 started (Combat-only, PeUI built-in)"
+print("[PE] v3.05 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
