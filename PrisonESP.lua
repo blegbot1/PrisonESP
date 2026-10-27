@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.86  (Combat-only: PeUI + admin theatre full)
+--  PRISON ESP  v2.87  (Combat-only: PeUI + admin theatre full)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -128,7 +128,10 @@ CFG.AutoGiveName = pickOpt(CFG.AutoGiveName, {
     "MG42", "Kord", "Hammer", "KeyCard", "GIVE ALL" }, "M9")
 -- РЕТРИБУЦИЯ: получили урон — мгновенно находим атакующего
 -- (вооружённые в приоритете) и сжигаем его.
+-- РЕТРИБУЦИЯ с ПЕРЕКЛЮЧАЕМЫМ УРОНОМ: сколько отдавать тому, кто бьёт
+-- тебя. nil = «как у ауры» (следует слайдеру Damage per shot).
 CFG.Retr = CFG.Retr ~= false
+CFG.RetrDamage = tonumber(CFG.RetrDamage) or nil
 -- АНТИ-АФК: VirtualUser отвечает за нас на idle-проверку Roblox —
 -- долгие сессии без кика.
 CFG.AntiAFK = CFG.AntiAFK ~= false
@@ -1550,8 +1553,10 @@ local function auraTick()
                 local bt = PE_BURN_AT[retTarget]
                 local burnR = (not bt or now - bt > 1.5)
                 if burnR then PE_BURN_AT[retTarget] = now end
+                -- Переключаемый урон: слайдер RetrDamage, 0 = как аура.
                 local dmgR = math.clamp(
-                    tonumber(CFG.KillAuraDamage) or 50, 1, 200)
+                    tonumber(CFG.RetrDamage)
+                    or tonumber(CFG.KillAuraDamage) or 50, 1, 200)
                 pcall(function()
                     remoteR:FireServer(humA, headA, dmgR,
                         Vector3.new(0, 1, 0), 0, 0, burnR)
@@ -2373,21 +2378,53 @@ do
                         "pe_bg.png", "pe_bg.jpg", "pe_bg.jpeg" }) do
                         if isfile(name) then
                             bgLog("local file found: " .. name)
-                            local okA, asset = pcall(function()
-                                return getcustomasset({ filepath = name })
-                            end)
-                            if not okA or not asset then
-                                bgLog("table form failed, trying string form")
-                                okA, asset = pcall(function()
-                                    return getcustomasset(name)
+                            -- v2.87: СПЕРВА рерайт через writefile — файл,
+                            -- положенный руками, у части экзекуторов
+                            -- даёт ПУСТОЙ ассет (size 0,0 в прошлых
+                            -- логах), а writefile-копии регистрируются.
+                            if type(readfile) == "function"
+                               and type(writefile) == "function" then
+                                local okR, content = pcall(function()
+                                    return readfile(name)
                                 end)
+                                if okR and type(content) == "string"
+                                   and #content > 500 then
+                                    pcall(function()
+                                        writefile("pe_bg_re.png", content)
+                                    end)
+                                    local okW, assetW = pcall(function()
+                                        return getcustomasset({
+                                            filepath = "pe_bg_re.png" })
+                                    end)
+                                    if not okW or not assetW then
+                                        okW, assetW = pcall(function()
+                                            return getcustomasset(
+                                                "pe_bg_re.png")
+                                        end)
+                                    end
+                                    if okW and type(assetW) == "string" then
+                                        bgSrc = assetW
+                                        bgLog("asset OK via writefile copy")
+                                    end
+                                end
                             end
-                            if okA and type(asset) == "string" then
-                                bgSrc = asset
-                                bgLog("custom asset OK")
-                            else
-                                bgLog("getcustomasset FAILED: "
-                                    .. tostring(asset))
+                            if not bgSrc then
+                                local okA, asset = pcall(function()
+                                    return getcustomasset({ filepath = name })
+                                end)
+                                if not okA or not asset then
+                                    bgLog("table form failed, trying string form")
+                                    okA, asset = pcall(function()
+                                        return getcustomasset(name)
+                                    end)
+                                end
+                                if okA and type(asset) == "string" then
+                                    bgSrc = asset
+                                    bgLog("custom asset OK (direct)")
+                                else
+                                    bgLog("getcustomasset FAILED: "
+                                        .. tostring(asset))
+                                end
                             end
                             break
                         end
@@ -3537,6 +3574,15 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_Retr",
         CurrentValue = CFG.Retr ~= false,
         Callback = function(v) CFG.Retr = v end })
+    C:CreateSlider({ Name = "Damage back to attacker (0 = same as aura)",
+        Flag = "PE_RetrDamage",
+        Range = {0, 200}, Increment = 5,
+        CurrentValue = CFG.RetrDamage or 0,
+        Suffix = " dmg",
+        Callback = function(v)
+            -- 0 = «следовать урону ауры» (старое поведение).
+            CFG.RetrDamage = v > 0 and v or nil
+        end })
     C:CreateToggle({ Name = "Immortality (self-heal loop, 0 dmg)",
         Flag = "PE_Immortal",
         CurrentValue = CFG.Immortal == true,
@@ -4069,9 +4115,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.86 stopped")
+    print("[PE] v2.87 stopped")
 end
 
-print("[PE] v2.86 started (Combat-only, PeUI built-in)"
+print("[PE] v2.87 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
