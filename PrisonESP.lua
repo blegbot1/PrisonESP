@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.84  (Combat-only: PeUI + admin theatre full)
+--  PRISON ESP  v2.85  (Combat-only: PeUI + admin theatre full)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1034,6 +1034,29 @@ G.PE.FakeShot = function(atSel)
     print("[PE FAKE] tracer sent -> " .. tostring(target))
 end
 
+-- theatreTool: для театра нужен релей с ВИДИМЫМ хэндлом (трассер
+-- рисуется от нашей пушки). В руках пусто — экипируем свою пушку
+-- из рюкзака сами, а не требуем от игрока «возьми в руки».
+local function theatreTool()
+    local chr = LP.Character
+    local tool = chr and chr:FindFirstChildOfClass("Tool")
+    if tool and tool:FindFirstChild("VisualizeBullet") then
+        return tool
+    end
+    local bp = LP:FindFirstChild("Backpack")
+    local hum = chr and chr:FindFirstChildOfClass("Humanoid")
+    if bp and hum then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t:FindFirstChild("VisualizeBullet") then
+                pcall(function() hum:EquipTool(t) end)
+                task.wait(0.05)
+                return chr:FindFirstChildOfClass("Tool")
+            end
+        end
+    end
+    return nil
+end
+
 -- SKY SHOT: театральный «админ-страйк». Трассер рисуется ОТ ХЭНДЛА
 -- нашей пушки (сервер ретранслирует как есть), поэтому «с неба»
 -- стреляем по-честному: телепорт вверх на 0.4с → залп из 3 трассеров
@@ -1049,9 +1072,9 @@ G.PE.SkyShot = function(namePart)
     local chr = LP.Character
     local rootS = chr and chr:FindFirstChild("HumanoidRootPart")
     if not rootS then print("[PE SKY] no character") return end
-    local tool = chr:FindFirstChildOfClass("Tool")
+    local tool = theatreTool()
     if not tool then
-        print("[PE SKY] take any gun in hands (relay source)")
+        print("[PE SKY] no gun in hands/backpack")
         return
     end
     local gsl = tool:FindFirstChild("GunScript_Local")
@@ -1137,9 +1160,9 @@ G.PE.SquadShot = function(namePart)
     local chr = LP.Character
     local rootS = chr and chr:FindFirstChild("HumanoidRootPart")
     if not rootS then print("[PE SQUAD] no character") return end
-    local tool = chr:FindFirstChildOfClass("Tool")
+    local tool = theatreTool()
     if not tool then
-        print("[PE SQUAD] take any gun in hands (relay source)")
+        print("[PE SQUAD] no gun in hands/backpack")
         return
     end
     local gsl = tool:FindFirstChild("GunScript_Local")
@@ -1208,9 +1231,9 @@ G.PE.SoundBoard = function(soundId)
         return
     end
     local chr = LP.Character
-    local tool = chr and chr:FindFirstChildOfClass("Tool")
+    local tool = theatreTool()
     if not tool then
-        print("[PE SBD] take any gun in hands (relay source)")
+        print("[PE SBD] no gun in hands/backpack")
         return
     end
     local gsl = tool:FindFirstChild("GunScript_Local")
@@ -1258,9 +1281,9 @@ G.PE.OrbitalBeam = function(namePart)
     local chr = LP.Character
     local rootS = chr and chr:FindFirstChild("HumanoidRootPart")
     if not rootS then print("[PE ORB] no character") return end
-    local tool = chr:FindFirstChildOfClass("Tool")
+    local tool = theatreTool()
     if not tool then
-        print("[PE ORB] take any gun in hands (relay source)")
+        print("[PE ORB] no gun in hands/backpack")
         return
     end
     local gsl = tool:FindFirstChild("GunScript_Local")
@@ -1357,20 +1380,19 @@ G.PE.Levitate = function()
     task.spawn(function()
         local base = root.CFrame
         pcall(function() root.Anchored = true end)
-        -- Плавный подъём (8 шагов по 0.15с).
-        for i = 1, 8 do
+        -- Подъём: 12 шагов по 1.6 стада (~19 стадов), быстрее.
+        for i = 1, 12 do
             pcall(function()
-                root.CFrame = base + Vector3.new(0, i * 1.1, 0)
+                root.CFrame = base + Vector3.new(0, i * 1.6, 0)
             end)
-            task.wait(0.15)
+            task.wait(0.08)
         end
-        task.wait(3)
-        -- Плавный спуск.
-        for i = 8, 1, -1 do
+        task.wait(2.5)
+        for i = 12, 1, -1 do
             pcall(function()
-                root.CFrame = base + Vector3.new(0, i * 1.1, 0)
+                root.CFrame = base + Vector3.new(0, i * 1.6, 0)
             end)
-            task.wait(0.12)
+            task.wait(0.06)
         end
         pcall(function()
             root.CFrame = base
@@ -2481,12 +2503,23 @@ do
                 end
             end
             if bgSrc then
-                mk("ImageLabel", {
+                -- Светлая подложка ПОД фото: картинка — тёмный силуэт
+                -- на ПРОЗРАЧНОМ фоне, на тёмном окне она невидима.
+                -- Мягкая светлая панель делает силуэт читаемым.
+                mk("Frame", {
+                    Name = "BgLight",
+                    Size = UDim2.new(1, 0, 1, 0),
+                    BackgroundColor3 = Color3.fromRGB(205, 196, 232),
+                    BackgroundTransparency = 0.6,
+                    BorderSizePixel = 0,
+                    ZIndex = 0,
+                }, root)
+                local bgImage = mk("ImageLabel", {
                     Name = "BgPhoto",
                     Size = UDim2.new(1, 0, 1, 0),
                     BackgroundTransparency = 1,
                     Image = bgSrc,
-                    ImageTransparency = 0.15,
+                    ImageTransparency = 0,
                     ScaleType = Enum.ScaleType.Fit,
                     BorderSizePixel = 0,
                     ZIndex = 0,
@@ -2495,10 +2528,21 @@ do
                     Name = "BgDim",
                     Size = UDim2.new(1, 0, 1, 0),
                     BackgroundColor3 = Color3.fromRGB(10, 6, 18),
-                    BackgroundTransparency = 0.4,
+                    BackgroundTransparency = 0.45,
                     BorderSizePixel = 0,
                     ZIndex = 0,
                 }, root)
+                -- Диагностика: картинка реально декодировалась?
+                task.delay(2, function()
+                    pcall(function()
+                        print("[PE UI] bg: image loaded = "
+                            .. tostring(bgImage.IsLoaded)
+                            .. " (size " .. tostring(bgImage.ImageRectSize)
+                            .. ")")
+                    end)
+                end)
+            else
+                print("[PE UI] bg: photo OFF (no source)")
             end
         end
 
@@ -3674,21 +3718,9 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.Team("Prisoner") end })
     C:CreateButton({ Name = "Team: ESCAPED (criminal)",
         Callback = function() G.PE.Team("Escaped") end })
-    C:CreateDropdown({
-        Name = "Switch team",
-        Flag = "PE_TeamPick",
-        Options = { "Guard", "Prisoner", "Escaped", "Undecided" },
-        CurrentOption = { "Guard" },
-        MultipleOptions = false,
-        Callback = function(selected)
-            local picked = selected
-            if type(picked) == "table" then picked = picked[1] end
-            if type(picked) == "string" then
-                G.PE.Team(picked)
-                print("[PE] team switch: " .. picked)
-            end
-        end,
-    })
+    -- Дропдаун «Switch team» удалён (v2.85): восстановление конфига
+    -- фаерило его колбэк при СТАРТЕ — ChooseTeamEvent респавнил нас
+    -- сразу после загрузки. Кнопки выше покрывают всё.
     C:CreateSection("Auto team on respawn")
     C:CreateParagraph({ Title = "Auto team",
         Content = "Pick a team and the script CONSTANTLY returns you to it - check every second and right after death. Example: set Escaped and any kill puts you back into criminals automatically. Off = never auto-switch. Paused while APOCALYPSE runs (it flips teams itself)." })
@@ -4053,9 +4085,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.84 stopped")
+    print("[PE] v2.85 stopped")
 end
 
-print("[PE] v2.84 started (Combat-only, PeUI built-in)"
+print("[PE] v2.85 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
