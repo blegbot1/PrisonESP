@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.82  (Combat-only: PeUI + admin theatre)
+--  PRISON ESP  v2.83  (Combat-only: PeUI + admin theatre + fire)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -107,6 +107,10 @@ CFG.C00lDamage = tonumber(CFG.C00lDamage) or 3
 CFG.C00lFling = CFG.C00lFling == true
 CFG.C00lTeam = (type(CFG.C00lTeam) == "string"
     and CFG.C00lTeam ~= "") and CFG.C00lTeam or "Everyone"
+-- FIRE AURA: театральная аура огня — все в радиусе 15 стадов горят
+-- (1 урона + серверный огонь). Карту сервер не поджигает — только
+-- игроки (проверка принадлежности, доказано вживую).
+CFG.FireAura = CFG.FireAura == true
 -- АПОКАЛИПСИС = УБИВАЛКА: один тумблер делает всё сам —
 -- 1) команда СБЕЖАВШИЙ, 2) сам берёт M9, 3) телепорт высоко в небо
 -- (не достанут; дистанции урона нет — доказано), 4) все игроки
@@ -1100,6 +1104,23 @@ G.PE.SkyShot = function(namePart)
                 and LP.Character:FindFirstChild("HumanoidRootPart")
             if rB then rB.CFrame = homeCF end
         end)
+        -- ФИНАЛ СТРАЙКА: цель-игрок вспыхивает (1 урона + серверный
+        -- огонь) — «админ сжёг с неба». Тиммейта сервер отклонит сам.
+        if namePart then
+            local pF = findPlayer(tostring(namePart))
+            local humF = pF and pF.Character
+                and pF.Character:FindFirstChildOfClass("Humanoid")
+            local headF = pF and pF.Character
+                and (pF.Character:FindFirstChild("Head")
+                    or pF.Character:FindFirstChild("HumanoidRootPart"))
+            local remoteF = myGunRemote("InflictTarget")
+            if humF and headF and humF.Health > 0 and remoteF then
+                pcall(function()
+                    remoteF:FireServer(humF, headF, 1,
+                        Vector3.new(0, 1, 0), 0, 0, true)
+                end)
+            end
+        end
     end)
     print("[PE SKY] sky strike -> " .. tostring(target))
 end
@@ -1277,6 +1298,7 @@ local modAt = 0
 local immortalAt = 0
 local immortalTapAt = 0
 local c00lAt = 0
+local fireAuraAt = 0
 local retAt = 0
 local PE_LAST_HP = -1
 local PE_HIT_AT = 0
@@ -1447,6 +1469,42 @@ local function auraTick()
         if toolM and toolM:FindFirstChild("Setting")
            and not toolM:GetAttribute("PE_Marked") then
             G.PE.ModGun()
+        end
+    end
+
+    -- FIRE AURA: театральная аура огня — все, кто подошёл ближе
+    -- 15 стадов, вспыхивают (1 урона + серверный огонь). Со стороны
+    -- выглядит как «опасный админ», урона почти нет. Карту сервер
+    -- не жжёт (проверка принадлежности) — только игроки.
+    if CFG.FireAura and now - fireAuraAt >= 2 then
+        fireAuraAt = now
+        local remoteFA = myGunRemote("InflictTarget")
+        local chrFA = LP.Character
+        local rootFA = chrFA and chrFA:FindFirstChild("HumanoidRootPart")
+        if remoteFA and rootFA then
+            for _, pF in ipairs(Players:GetPlayers()) do
+                if pF ~= LP then
+                    local chF2 = pF.Character
+                    local hF2 = chF2
+                        and chF2:FindFirstChildOfClass("Humanoid")
+                    local headF2 = chF2 and (chF2:FindFirstChild("Head")
+                        or chF2:FindFirstChild("HumanoidRootPart"))
+                    if chF2 and hF2 and hF2.Health > 0 and headF2
+                       and not chF2:FindFirstChildOfClass("ForceField") then
+                        local dFA = (headF2.Position
+                            - rootFA.Position).Magnitude
+                        if dFA <= 15 then
+                            local btF = PE_BURN_AT[pF]
+                            local burnFA = (not btF or now - btF > 2)
+                            if burnFA then PE_BURN_AT[pF] = now end
+                            pcall(function()
+                                remoteFA:FireServer(hF2, headF2, 1,
+                                    Vector3.new(0, 1, 0), 0, 0, burnFA)
+                            end)
+                        end
+                    end
+                end
+            end
         end
     end
 
@@ -3404,6 +3462,17 @@ local okGUI, errGUI = pcall(function()
         end })
     C:CreateButton({ Name = "PLAY gunshot (verified id)",
         Callback = function() G.PE.SoundBoard(186809061) end })
+    C:CreateSection("Fire theatre")
+    C:CreateParagraph({ Title = "Fire aura",
+        Content = "Everyone who walks closer than 15 studs catches FIRE (1 damage + server fire). You look like a burning boss - run through the cafeteria and the whole room is on fire. The map itself cannot burn: the server only allows fire on players." })
+    C:CreateToggle({ Name = "FIRE AURA (everyone near you burns)",
+        Flag = "PE_FireAura",
+        CurrentValue = CFG.FireAura == true,
+        Callback = function(v)
+            CFG.FireAura = v
+            print("[PE] fire aura " .. (v and "ON - stay dangerous"
+                or "OFF"))
+        end })
     C:CreateSection("C00LKIDD MODE (2014)")
     C:CreateParagraph({ Title = "c00lkidd",
         Content = "Slow-burn EVERYONE: tiny damage every 1.2s + server fire - players burn and die slowly, visible to the whole server (needs a gun). The 2014 legend returns." })
@@ -3844,9 +3913,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.82 stopped")
+    print("[PE] v2.83 stopped")
 end
 
-print("[PE] v2.82 started (Combat-only, PeUI built-in)"
+print("[PE] v2.83 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
