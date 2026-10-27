@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.85  (Combat-only: PeUI + admin theatre full)
+--  PRISON ESP  v2.86  (Combat-only: PeUI + admin theatre full)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1107,6 +1107,9 @@ G.PE.SkyShot = function(namePart)
                 + Vector3.new(math.random(-10, 10), 160,
                     math.random(-10, 10)))
         end)
+        -- 0.5с на репликацию: иначе сервер и чужие клиенты ещё видят
+        -- нас на земле, и трассеры уходят со старой позиции.
+        task.wait(0.5)
         for _ = 1, 3 do
             pcall(function()
                 vb:FireServer(handle, Vector3.new(0, 0.625, 1.25),
@@ -1193,6 +1196,7 @@ G.PE.SquadShot = function(namePart)
         pcall(function()
             rootS.CFrame = CFrame.new(target + Vector3.new(0, 180, 0))
         end)
+        task.wait(0.5) -- репликация: сервер должен узнать, что мы в небе
         for i = 1, 5 do
             local ang = (i / 5) * math.pi * 2
             local from = target
@@ -1220,53 +1224,7 @@ G.PE.SquadShot = function(namePart)
     print("[PE SQUAD] 5-man volley -> " .. tostring(target))
 end
 
--- SOUNDBOARD: сервер ретранслирует soundId из VisualizeBullet ВСЕМ
--- игрокам — любой звук можно проиграть на весь сервер. Луч делаем
--- невидимым (прозрачный трейл): виден только эффект звука.
-G.PE.SoundBoard = function(soundId)
-    local nowS = os.clock()
-    if nowS - (G._sbdAt or 0) < 8 then
-        print("[PE SBD] cooldown (" ..
-            string.format("%.1f", 8 - (nowS - (G._sbdAt or 0))) .. "s)")
-        return
-    end
-    local chr = LP.Character
-    local tool = theatreTool()
-    if not tool then
-        print("[PE SBD] no gun in hands/backpack")
-        return
-    end
-    local gsl = tool:FindFirstChild("GunScript_Local")
-    local vb = tool:FindFirstChild("VisualizeBullet")
-    local handle = tool:FindFirstChild("Handle")
-    if not (gsl and vb and handle) then
-        print("[PE SBD] " .. tool.Name .. " has no VisualizeBullet")
-        return
-    end
-    local id = tonumber(soundId)
-    if not id or id <= 0 then
-        print("[PE SBD] bad sound id: " .. tostring(soundId))
-        return
-    end
-    local rootS = chr:FindFirstChild("HumanoidRootPart")
-    local at = rootS and rootS.Position
-        or (LP:GetMouse().Hit and LP:GetMouse().Hit.Position)
-    if not at then return end
-    G._sbdAt = nowS
-    pcall(function()
-        vb:FireServer(handle, Vector3.new(0, 0.625, 1.25), at,
-            gsl:FindFirstChild("MuzzleEffect"),
-            gsl:FindFirstChild("HitEffect"),
-            id,
-            { false, 8, 0 },
-            -- Трейл прозрачный: никто не видит луч, только слышит звук.
-            { 1, Vector3.new(0.1, 0.1, 10),
-                BrickColor.new("Institutional white").Color, 1,
-                Enum.Material.SmoothPlastic, 0.05 },
-            true, false)
-    end)
-    print("[PE SBD] sound " .. id .. " relayed to the whole server")
-end
+-- SOUNDBOARD удалён (v2.86) по запросу.
 
 -- ORBITAL BEAM: гигантский неоновый луч с неба в цель (толстый трейл
 -- через релей VisualizeBullet — видно ВСЕМ) + поджог цели. Со стороны —
@@ -1317,7 +1275,7 @@ G.PE.OrbitalBeam = function(namePart)
         pcall(function()
             rootS.CFrame = CFrame.new(target + Vector3.new(0, 250, 0))
         end)
-        task.wait(0.1)
+        task.wait(0.5) -- репликация позиции до выстрела
         pcall(function()
             vb:FireServer(handle, Vector3.new(0, 0.625, 1.25), target,
                 gsl:FindFirstChild("MuzzleEffect"),
@@ -2480,6 +2438,32 @@ do
                                 return getcustomasset("pe_bg.png")
                             end)
                         end
+                        -- Переписываем файл ЧЕРЕЗ writefile: часть
+                        -- экзекуторов принимает только свои файлы
+                        -- (вручную скопированные дают пустой ассет).
+                        if not okA or not asset then
+                            local okR, content = pcall(function()
+                                return readfile("pe_bg.png")
+                            end)
+                            if okR and type(content) == "string"
+                               and #content > 500 then
+                                pcall(function()
+                                    writefile("pe_bg_re.png", content)
+                                end)
+                                okA, asset = pcall(function()
+                                    return getcustomasset({
+                                        filepath = "pe_bg_re.png" })
+                                end)
+                                if not okA or not asset then
+                                    okA, asset = pcall(function()
+                                        return getcustomasset("pe_bg_re.png")
+                                    end)
+                                end
+                                if okA and type(asset) == "string" then
+                                    bgLog("rewritten file worked")
+                                end
+                            end
+                        end
                         if okA and type(asset) == "string" then
                             bgSrc = asset
                             bgLog("custom asset OK (from GitHub copy)")
@@ -2532,13 +2516,27 @@ do
                     BorderSizePixel = 0,
                     ZIndex = 0,
                 }, root)
-                -- Диагностика: картинка реально декодировалась?
-                task.delay(2, function()
+                -- Диагностика + самоудаление пустышки: Real вернул
+                -- ассет с ImageRectSize (0,0) — «loaded, но пустой».
+                -- Тогда убираем невидимку и подсказываем декал-путь.
+                task.delay(2.5, function()
                     pcall(function()
+                        local rs = bgImage.ImageRectSize
                         print("[PE UI] bg: image loaded = "
                             .. tostring(bgImage.IsLoaded)
-                            .. " (size " .. tostring(bgImage.ImageRectSize)
-                            .. ")")
+                            .. " (size " .. tostring(rs) .. ")")
+                        if rs.X < 2 or rs.Y < 2 then
+                            bgImage:Destroy()
+                            local dim = root:FindFirstChild("BgDim")
+                            if dim then dim:Destroy() end
+                            local lite = root:FindFirstChild("BgLight")
+                            if lite then lite:Destroy() end
+                            print("[PE UI] bg: executor returned an EMPTY "
+                                .. "asset - removed. Guaranteed path: "
+                                .. "upload the photo as a DECAL on "
+                                .. "roblox.com and set "
+                                .. "getgenv().PE_BG_ID = <decal id>")
+                        end
                     end)
                 end)
             else
@@ -3632,20 +3630,6 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.OrbitalBeam(CFG.KillAuraTeam) end })
     C:CreateButton({ Name = "LEVITATE (float in front of everyone)",
         Callback = function() G.PE.Levitate() end })
-    C:CreateSection("Sound board (whole server hears)")
-    C:CreateParagraph({ Title = "Sound board",
-        Content = "Relays ANY Roblox sound id to EVERY player (invisible beam). Paste an id from the toolbox, press PLAY. 8s cooldown. Gunshot 186809061 is verified; other ids are whatever you find." })
-    C:CreateInput({ Name = "Sound id",
-        PlaceholderText = "e.g. 186809061",
-        CurrentValue = "",
-        Flag = "PE_SoundId",
-        Callback = function(text) CFG._soundId = tostring(text) end })
-    C:CreateButton({ Name = "PLAY sound FOR EVERYONE",
-        Callback = function()
-            G.PE.SoundBoard(tonumber(CFG._soundId) or 186809061)
-        end })
-    C:CreateButton({ Name = "PLAY gunshot (verified id)",
-        Callback = function() G.PE.SoundBoard(186809061) end })
     C:CreateSection("Fire theatre")
     C:CreateParagraph({ Title = "Fire aura",
         Content = "Everyone who walks closer than 15 studs catches FIRE (1 damage + server fire). You look like a burning boss - run through the cafeteria and the whole room is on fire. The map itself cannot burn: the server only allows fire on players." })
@@ -4044,7 +4028,7 @@ G.PE_Stop = function()
     G.PE.WearOutfit, G.PE.ShopInfo = nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     G.PE.FakeShot, G.PE.SkyShot, G.PE.SquadShot = nil, nil, nil
-    G.PE.SoundBoard, G.PE.OrbitalBeam, G.PE.Levitate = nil, nil, nil
+    G.PE.OrbitalBeam, G.PE.Levitate = nil, nil
     G.PE.WP_Save, G.PE.WP_TP, G.PE.TPCrosshair = nil, nil, nil
     G.PE.EnsureWeapon, G.PE.HasWeapon = nil, nil
     G.PE.ApocGunName = nil
@@ -4085,9 +4069,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.85 stopped")
+    print("[PE] v2.86 stopped")
 end
 
-print("[PE] v2.85 started (Combat-only, PeUI built-in)"
+print("[PE] v2.86 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
