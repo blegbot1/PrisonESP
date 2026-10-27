@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.88  (Combat-only: PeUI + admin theatre full)
+--  PRISON ESP  v2.89  (Combat-only: PeUI + admin theatre full)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1856,14 +1856,21 @@ local function auraTick()
         local remoteI = myGunRemote("InflictTarget")
         if remoteI and humI and rootI and humI.Health > 0 then
             local damaged = humI.Health < humI.MaxHealth - 0.5
-            if (damaged and now - immortalAt >= 0.1)
-               or ((not damaged) and now - immortalAt >= 0.5) then
+            -- v2.89: лечим ЧАЩЕ. Самохил-пакет: 0.05с при уроне, 0.25с
+            -- в бою. Тап по врагу (единственный хил, который сервер
+            -- принимает): 0.1с при уроне, 0.25с в бою — HP держится
+            -- у максимума даже под непрерывным огнём.
+            local inCombat = lastShooter() ~= nil
+            local cadence = damaged and 0.05 or (inCombat and 0.25 or 0.5)
+            if now - immortalAt >= cadence then
                 immortalAt = now
                 pcall(function()
                     remoteI:FireServer(humI, rootI, 0,
                         Vector3.new(0, 0, 1), 0, 1000000, false)
                 end)
-                if damaged and now - immortalTapAt >= 0.3 then
+                local tapGap = damaged and 0.1 or 0.25
+                if (damaged or inCombat)
+                   and now - immortalTapAt >= tapGap then
                     immortalTapAt = now
                     -- Тап по источнику урона: сначала точный lastShooter
                     -- (кто стрелял), фолбэк — ближайший живой враг.
@@ -4127,9 +4134,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.88 stopped")
+    print("[PE] v2.89 stopped")
 end
 
-print("[PE] v2.88 started (Combat-only, PeUI built-in)"
+print("[PE] v2.89 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
