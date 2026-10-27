@@ -1956,6 +1956,33 @@ do
                     end
                 end)
             end
+            -- Локального файла нет — качаем с нашего GitHub и
+            -- подключаем тем же getcustomasset.
+            if not bgSrc and type(getcustomasset) == "function"
+               and type(writefile) == "function"
+               and type(isfile) == "function" then
+                pcall(function()
+                    if not isfile("pe_bg.png") then
+                        local okD, data = pcall(function()
+                            return game:HttpGet(
+                                "https://raw.githubusercontent.com/blegbot1/PrisonESP/main/pe_bg.png",
+                                true)
+                        end)
+                        if okD and type(data) == "string"
+                           and #data > 500 then
+                            pcall(function() writefile("pe_bg.png", data) end)
+                        end
+                    end
+                    if isfile("pe_bg.png") then
+                        local okA, asset = pcall(function()
+                            return getcustomasset({ filepath = "pe_bg.png" })
+                        end)
+                        if okA and type(asset) == "string" then
+                            bgSrc = asset
+                        end
+                    end
+                end)
+            end
             if not bgSrc then
                 local manual = getgenv().PE_BG_ID
                 if type(manual) == "number" and manual > 0 then
