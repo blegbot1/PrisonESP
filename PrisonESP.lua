@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.81  (Combat-only: PeUI + фон-фото + sky strike)
+--  PRISON ESP  v2.82  (Combat-only: PeUI + admin theatre)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1102,6 +1102,126 @@ G.PE.SkyShot = function(namePart)
         end)
     end)
     print("[PE SKY] sky strike -> " .. tostring(target))
+end
+
+-- SQUAD SHOT: как SKY SHOT, но 5 трассеров с разных точек неба за один
+-- блинк — со стороны выглядит как работа целой админ-команды.
+G.PE.SquadShot = function(namePart)
+    local nowS = os.clock()
+    if nowS - (G._squadAt or 0) < 8 then
+        print("[PE SQUAD] cooldown (" ..
+            string.format("%.1f", 8 - (nowS - (G._squadAt or 0))) .. "s)")
+        return
+    end
+    local chr = LP.Character
+    local rootS = chr and chr:FindFirstChild("HumanoidRootPart")
+    if not rootS then print("[PE SQUAD] no character") return end
+    local tool = chr:FindFirstChildOfClass("Tool")
+    if not tool then
+        print("[PE SQUAD] take any gun in hands (relay source)")
+        return
+    end
+    local gsl = tool:FindFirstChild("GunScript_Local")
+    local vb = tool:FindFirstChild("VisualizeBullet")
+    local handle = tool:FindFirstChild("Handle")
+    if not (gsl and vb and handle) then
+        print("[PE SQUAD] " .. tool.Name .. " has no VisualizeBullet")
+        return
+    end
+    local target = nil
+    if namePart then
+        local p = findPlayer(tostring(namePart))
+        local headF = p and p.Character
+            and p.Character:FindFirstChild("Head")
+        if headF then target = headF.Position end
+    end
+    if not target then
+        local m = LP:GetMouse()
+        target = m and m.Hit and m.Hit.Position
+    end
+    if not target then
+        print("[PE SQUAD] no target position")
+        return
+    end
+    local homeCF = rootS.CFrame
+    G._squadAt = nowS
+    task.spawn(function()
+        pcall(function()
+            rootS.CFrame = CFrame.new(target + Vector3.new(0, 180, 0))
+        end)
+        for i = 1, 5 do
+            local ang = (i / 5) * math.pi * 2
+            local from = target
+                + Vector3.new(math.cos(ang) * 25, 120,
+                    math.sin(ang) * 25)
+            pcall(function()
+                vb:FireServer(handle, Vector3.new(0, 0.625, 1.25), from,
+                    gsl:FindFirstChild("MuzzleEffect"),
+                    gsl:FindFirstChild("HitEffect"),
+                    186809061,
+                    { false, 8, 0 },
+                    { 25, Vector3.new(0.3, 0.3, 200),
+                        BrickColor.new("Really red").Color, 0.1,
+                        Enum.Material.Neon, 0.2 },
+                    true, false)
+            end)
+            task.wait(0.08)
+        end
+        pcall(function()
+            local rB = LP.Character
+                and LP.Character:FindFirstChild("HumanoidRootPart")
+            if rB then rB.CFrame = homeCF end
+        end)
+    end)
+    print("[PE SQUAD] 5-man volley -> " .. tostring(target))
+end
+
+-- SOUNDBOARD: сервер ретранслирует soundId из VisualizeBullet ВСЕМ
+-- игрокам — любой звук можно проиграть на весь сервер. Луч делаем
+-- невидимым (прозрачный трейл): виден только эффект звука.
+G.PE.SoundBoard = function(soundId)
+    local nowS = os.clock()
+    if nowS - (G._sbdAt or 0) < 8 then
+        print("[PE SBD] cooldown (" ..
+            string.format("%.1f", 8 - (nowS - (G._sbdAt or 0))) .. "s)")
+        return
+    end
+    local chr = LP.Character
+    local tool = chr and chr:FindFirstChildOfClass("Tool")
+    if not tool then
+        print("[PE SBD] take any gun in hands (relay source)")
+        return
+    end
+    local gsl = tool:FindFirstChild("GunScript_Local")
+    local vb = tool:FindFirstChild("VisualizeBullet")
+    local handle = tool:FindFirstChild("Handle")
+    if not (gsl and vb and handle) then
+        print("[PE SBD] " .. tool.Name .. " has no VisualizeBullet")
+        return
+    end
+    local id = tonumber(soundId)
+    if not id or id <= 0 then
+        print("[PE SBD] bad sound id: " .. tostring(soundId))
+        return
+    end
+    local rootS = chr:FindFirstChild("HumanoidRootPart")
+    local at = rootS and rootS.Position
+        or (LP:GetMouse().Hit and LP:GetMouse().Hit.Position)
+    if not at then return end
+    G._sbdAt = nowS
+    pcall(function()
+        vb:FireServer(handle, Vector3.new(0, 0.625, 1.25), at,
+            gsl:FindFirstChild("MuzzleEffect"),
+            gsl:FindFirstChild("HitEffect"),
+            id,
+            { false, 8, 0 },
+            -- Трейл прозрачный: никто не видит луч, только слышит звук.
+            { 1, Vector3.new(0.1, 0.1, 10),
+                BrickColor.new("Institutional white").Color, 1,
+                Enum.Material.SmoothPlastic, 0.05 },
+            true, false)
+    end)
+    print("[PE SBD] sound " .. id .. " relayed to the whole server")
 end
 
 -- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
@@ -3268,6 +3388,22 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.SkyShot() end })
     C:CreateButton({ Name = "SKY SHOT at selected player",
         Callback = function() G.PE.SkyShot(CFG.KillAuraTeam) end })
+    C:CreateButton({ Name = "SQUAD SHOT at cursor (5 angles)",
+        Callback = function() G.PE.SquadShot() end })
+    C:CreateSection("Sound board (whole server hears)")
+    C:CreateParagraph({ Title = "Sound board",
+        Content = "Relays ANY Roblox sound id to EVERY player (invisible beam). Paste an id from the toolbox, press PLAY. 8s cooldown. Gunshot 186809061 is verified; other ids are whatever you find." })
+    C:CreateInput({ Name = "Sound id",
+        PlaceholderText = "e.g. 186809061",
+        CurrentValue = "",
+        Flag = "PE_SoundId",
+        Callback = function(text) CFG._soundId = tostring(text) end })
+    C:CreateButton({ Name = "PLAY sound FOR EVERYONE",
+        Callback = function()
+            G.PE.SoundBoard(tonumber(CFG._soundId) or 186809061)
+        end })
+    C:CreateButton({ Name = "PLAY gunshot (verified id)",
+        Callback = function() G.PE.SoundBoard(186809061) end })
     C:CreateSection("C00LKIDD MODE (2014)")
     C:CreateParagraph({ Title = "c00lkidd",
         Content = "Slow-burn EVERYONE: tiny damage every 1.2s + server fire - players burn and die slowly, visible to the whole server (needs a gun). The 2014 legend returns." })
@@ -3666,7 +3802,8 @@ G.PE_Stop = function()
     G.PE.EscapeTrip = nil
     G.PE.WearOutfit, G.PE.ShopInfo = nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
-    G.PE.FakeShot = nil
+    G.PE.FakeShot, G.PE.SkyShot, G.PE.SquadShot = nil, nil, nil
+    G.PE.SoundBoard = nil
     G.PE.WP_Save, G.PE.WP_TP, G.PE.TPCrosshair = nil, nil, nil
     G.PE.EnsureWeapon, G.PE.HasWeapon = nil, nil
     G.PE.ApocGunName = nil
@@ -3707,9 +3844,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.81 stopped")
+    print("[PE] v2.82 stopped")
 end
 
-print("[PE] v2.81 started (Combat-only, PeUI built-in)"
+print("[PE] v2.82 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
