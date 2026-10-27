@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.91  (Combat-only: PeUI + двойной фон)
+--  PRISON ESP  v2.92  (Combat-only: PeUI + декал-фон)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2384,172 +2384,26 @@ do
         corner(12, root)
         stroke(THEME.Stroke, 1, root)
 
-        -- ФОН-ФОТО: pe_bg.png из workspace исполнителя через
-        -- getcustomasset, качаем с GitHub если нет, либо декал
-        -- getgenv().PE_BG_ID. Каждый шаг печатаем в консоль —
-        -- чтобы «фото не грузится» диагностировалось с первого раза.
+        -- BACKGROUND PHOTO: uploaded to Roblox as a decal
+        -- (ID 93512518437052, account kitichek4ek). The decal loads
+        -- WITHOUT getcustomasset - the owner always sees own decal.
+        -- getgenv().PE_BG_ID overrides when set. The whole
+        -- getcustomasset pipeline removed: Real returned empty assets.
         do
-            local bgSrc = nil
             local bgLog = function(step)
                 print("[PE UI] bg: " .. step)
             end
-            if type(getcustomasset) ~= "function" then
-                bgLog("getcustomasset NOT supported by executor")
-            else
-                bgLog("getcustomasset present")
+            local bgSrc = "rbxassetid://93512518437052"
+            bgLog("using user decal 93512518437052")
+            local manual = getgenv().PE_BG_ID
+            if type(manual) == "number" and manual > 0 then
+                bgSrc = "rbxassetid://" .. manual
+                bgLog("PE_BG_ID override: " .. manual)
+            elseif type(manual) == "string" and manual ~= "" then
+                bgSrc = manual
+                bgLog("PE_BG_ID override")
             end
-            if type(getcustomasset) == "function"
-               and type(isfile) == "function" then
-                pcall(function()
-                    for _, name in ipairs({
-                        "pe_bg.png", "pe_bg.jpg", "pe_bg.jpeg" }) do
-                        if isfile(name) then
-                            bgLog("local file found: " .. name)
-                            -- v2.87: СПЕРВА рерайт через writefile — файл,
-                            -- положенный руками, у части экзекуторов
-                            -- даёт ПУСТОЙ ассет (size 0,0 в прошлых
-                            -- логах), а writefile-копии регистрируются.
-                            if type(readfile) == "function"
-                               and type(writefile) == "function" then
-                                local okR, content = pcall(function()
-                                    return readfile(name)
-                                end)
-                                if okR and type(content) == "string"
-                                   and #content > 500 then
-                                    pcall(function()
-                                        writefile("pe_bg_re.png", content)
-                                    end)
-                                    local okW, assetW = pcall(function()
-                                        return getcustomasset({
-                                            filepath = "pe_bg_re.png" })
-                                    end)
-                                    if not okW or not assetW then
-                                        okW, assetW = pcall(function()
-                                            return getcustomasset(
-                                                "pe_bg_re.png")
-                                        end)
-                                    end
-                                    if okW and type(assetW) == "string" then
-                                        bgSrc = assetW
-                                        bgLog("asset OK via writefile copy")
-                                    end
-                                end
-                            end
-                            if not bgSrc then
-                                local okA, asset = pcall(function()
-                                    return getcustomasset({ filepath = name })
-                                end)
-                                if not okA or not asset then
-                                    bgLog("table form failed, trying string form")
-                                    okA, asset = pcall(function()
-                                        return getcustomasset(name)
-                                    end)
-                                end
-                                if okA and type(asset) == "string" then
-                                    bgSrc = asset
-                                    bgLog("custom asset OK (direct)")
-                                else
-                                    bgLog("getcustomasset FAILED: "
-                                        .. tostring(asset))
-                                end
-                            end
-                            break
-                        end
-                    end
-                    if not bgSrc then
-                        bgLog("no local pe_bg.* in workspace")
-                    end
-                end)
-            end
-            -- Локального файла нет — качаем с нашего GitHub и
-            -- подключаем тем же getcustomasset (обе формы вызова).
-            if not bgSrc and type(getcustomasset) == "function"
-               and type(writefile) == "function"
-               and type(isfile) == "function" then
-                pcall(function()
-                    local need = true
-                    if isfile("pe_bg.png") then
-                        local okS, s = pcall(function()
-                            -- readfile может не быть — тогда считаем,
-                            -- что файл валиден и не перекачиваем.
-                            return readfile and readfile("pe_bg.png") or nil
-                        end)
-                        need = not (okS and type(s) == "string" and #s > 500)
-                    end
-                    if need then
-                        bgLog("downloading pe_bg.png from GitHub...")
-                        local okD, data = pcall(function()
-                            return game:HttpGet(
-                                "https://raw.githubusercontent.com/blegbot1/PrisonESP/main/pe_bg.png",
-                                true)
-                        end)
-                        if okD and type(data) == "string"
-                           and #data > 500 then
-                            pcall(function() writefile("pe_bg.png", data) end)
-                            bgLog("downloaded " .. #data .. " bytes")
-                        else
-                            bgLog("GitHub download FAILED: "
-                                .. tostring(data))
-                        end
-                    end
-                    if isfile("pe_bg.png") then
-                        bgLog("downloaded file present, building asset")
-                        local okA, asset = pcall(function()
-                            return getcustomasset({ filepath = "pe_bg.png" })
-                        end)
-                        if not okA or not asset then
-                            okA, asset = pcall(function()
-                                return getcustomasset("pe_bg.png")
-                            end)
-                        end
-                        -- Переписываем файл ЧЕРЕЗ writefile: часть
-                        -- экзекуторов принимает только свои файлы
-                        -- (вручную скопированные дают пустой ассет).
-                        if not okA or not asset then
-                            local okR, content = pcall(function()
-                                return readfile("pe_bg.png")
-                            end)
-                            if okR and type(content) == "string"
-                               and #content > 500 then
-                                pcall(function()
-                                    writefile("pe_bg_re.png", content)
-                                end)
-                                okA, asset = pcall(function()
-                                    return getcustomasset({
-                                        filepath = "pe_bg_re.png" })
-                                end)
-                                if not okA or not asset then
-                                    okA, asset = pcall(function()
-                                        return getcustomasset("pe_bg_re.png")
-                                    end)
-                                end
-                                if okA and type(asset) == "string" then
-                                    bgLog("rewritten file worked")
-                                end
-                            end
-                        end
-                        if okA and type(asset) == "string" then
-                            bgSrc = asset
-                            bgLog("custom asset OK (from GitHub copy)")
-                        else
-                            bgLog("getcustomasset FAILED: "
-                                .. tostring(asset))
-                        end
-                    end
-                end)
-            end
-            if not bgSrc then
-                local manual = getgenv().PE_BG_ID
-                if type(manual) == "number" and manual > 0 then
-                    bgSrc = "rbxassetid://" .. manual
-                    bgLog("using PE_BG_ID decal")
-                elseif type(manual) == "string" and manual ~= "" then
-                    bgSrc = manual
-                    bgLog("using PE_BG_ID decal")
-                else
-                    bgLog("NO background source available")
-                end
-            end
+
             if bgSrc then
                 -- ДВОЙНОЙ ФОН: фиолетовая база остаётся, фото ложится
                 -- ВТОРЫМ СЛОЕМ — портретная панель справа на светлой
@@ -2578,38 +2432,36 @@ do
                 }, panel)
                 PeUI._bgPanel = panel
                 PeUI._bgImage = bgImage
-                -- Диагностика + самопочинка: Real отдал ассет с
-                -- ImageRectSize (0,0) — «loaded, но пустой». Пробуем
-                -- живой декал PE_BG_ID; нет декала — панель убираем.
+                -- Диагностика + терпение: новый декал может пройти
+                -- модерацию с задержкой — проверяем 3 раза (2.5/7.5/15с)
+                -- и только потом сдаёмся.
                 task.delay(2.5, function()
                     pcall(function()
-                        local rs = bgImage.ImageRectSize
-                        print("[PE UI] bg: image loaded = "
-                            .. tostring(bgImage.IsLoaded)
-                            .. " (size " .. tostring(rs) .. ")")
-                        if rs.X < 2 or rs.Y < 2 then
-                            local manual = getgenv().PE_BG_ID
-                            if type(manual) == "number" and manual > 0 then
-                                bgImage.Image = "rbxassetid://" .. manual
-                                print("[PE UI] bg: empty asset - switched "
-                                    .. "to PE_BG_ID decal")
-                            elseif type(manual) == "string"
-                               and manual ~= "" then
-                                bgImage.Image = manual
-                                print("[PE UI] bg: empty asset - switched "
-                                    .. "to PE_BG_ID")
-                            else
-                                if PeUI._bgPanel then
-                                    pcall(function() PeUI._bgPanel:Destroy() end)
-                                end
-                                PeUI._bgPanel = nil
-                                PeUI._bgImage = nil
-                                print("[PE UI] bg: executor returned an "
-                                    .. "EMPTY asset - panel removed. "
-                                    .. "Guaranteed path: upload the photo "
-                                    .. "as a DECAL on roblox.com and paste "
-                                    .. "its id in Settings -> Photo decal ID")
+                        for _, extra in ipairs({ 0, 5, 7.5 }) do
+                            if extra > 0 then task.wait(extra) end
+                            local rs = bgImage.ImageRectSize
+                            print("[PE UI] bg: image loaded = "
+                                .. tostring(bgImage.IsLoaded)
+                                .. " (size " .. tostring(rs) .. ")")
+                            if rs.X >= 2 and rs.Y >= 2 then
+                                print("[PE UI] bg: PHOTO IS VISIBLE")
+                                return
                             end
+                        end
+                        local manual = getgenv().PE_BG_ID
+                        if type(manual) == "number" and manual > 0 then
+                            bgImage.Image = "rbxassetid://" .. manual
+                            print("[PE UI] bg: empty asset - switched to "
+                                .. "PE_BG_ID decal")
+                        elseif type(manual) == "string"
+                           and manual ~= "" then
+                            bgImage.Image = manual
+                            print("[PE UI] bg: empty asset - switched to "
+                                .. "PE_BG_ID")
+                        else
+                            print("[PE UI] bg: decal still empty after "
+                                .. "15s - moderating, or paste another "
+                                .. "decal id in Settings -> Photo decal ID")
                         end
                     end)
                 end)
@@ -4178,9 +4030,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.91 stopped")
+    print("[PE] v2.92 stopped")
 end
 
-print("[PE] v2.91 started (Combat-only, PeUI built-in)"
+print("[PE] v2.92 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
