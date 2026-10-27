@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v3.00  (Combat-only: PeUI + широкий фон)
+--  PRISON ESP  v3.01  (Combat-only: PeUI + сверхширокий фон x4.2)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2479,7 +2479,7 @@ do
                     Name = "BgPhoto",
                     AnchorPoint = Vector2.new(0.5, 0),
                     Position = UDim2.new(0.5, 0, 0, 0),
-                    Size = UDim2.new(1.4, 0, 1, 0),
+                    Size = UDim2.new(4.2, 0, 1, 0),
                     BackgroundTransparency = 1,
                     Image = "",
                     ImageTransparency = 0,
@@ -4072,9 +4072,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v3.00 stopped")
+    print("[PE] v3.01 stopped")
 end
 
-print("[PE] v3.00 started (Combat-only, PeUI built-in)"
+print("[PE] v3.01 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
