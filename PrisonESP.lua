@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.94  (Combat-only: PeUI + admin theatre full)
+--  PRISON ESP  v2.95  (Combat-only: PeUI + PNG фон)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2393,60 +2393,61 @@ do
             local bgLog = function(step)
                 print("[PE UI] bg: " .. step)
             end
-            local bgImgURL = "https://raw.githubusercontent.com/"
-                .. "blegbot1/PrisonESP/main/pe_bg.jpg"
             local bgSrc = nil
-            -- v2.93: ФОТО С GITHUB через request/http_request (сырой
-            -- Body). game:HttpGet портит бинарные данные текстовым
-            -- декодированием - отсюда был пустой ассет (size 0,0).
-            -- Механика из ELITE HUB launcher, где это работало.
+            -- v2.95: ФОТО С GITHUB через request/http_request (сырой
+            -- Body) - проверено живым тестом, PNG рендерится.
+            -- Порядок: PNG (выбор пользователя) -> JPG (запасной).
             if type(request) == "function"
                or type(http_request) == "function" then
                 pcall(function()
-                    local imgFile = "pe_bg_img.jpg"
-                    local imgURL = bgImgURL
-                    local have = false
-                    if type(isfile) == "function" then
-                        local okI, exists = pcall(function()
-                            return isfile(imgFile)
-                        end)
-                        have = okI and exists
-                    end
-                    if not have then
-                        local okD, data = pcall(function()
-                            if type(http_request) == "function" then
-                                return http_request({
-                                    Url = imgURL, Method = "GET" })
-                            end
-                            return request({
-                                Url = imgURL, Method = "GET" })
-                        end)
-                        if okD and data and data.Body
-                           and #data.Body > 500 then
-                            pcall(function()
-                                writefile(imgFile, data.Body)
+                    local variants = {
+                        { file = "pe_bg_img.png",
+                          url = "https://raw.githubusercontent.com/"
+                              .. "blegbot1/PrisonESP/main/pe_bg.png" },
+                        { file = "pe_bg_img.jpg",
+                          url = "https://raw.githubusercontent.com/"
+                              .. "blegbot1/PrisonESP/main/pe_bg.jpg" },
+                    }
+                    for _, v in ipairs(variants) do
+                        local have = false
+                        if type(isfile) == "function" then
+                            local okI, exists = pcall(function()
+                                return isfile(v.file)
                             end)
-                            bgLog("downloaded jpg "
-                                .. #data.Body .. " bytes")
-                        else
-                            bgLog("jpg download failed: "
-                                .. tostring(data and data.StatusCode))
+                            have = okI and exists
                         end
-                    end
-                    local okI2, exists2 = pcall(function()
-                        return isfile(imgFile)
-                    end)
-                    if okI2 and exists2 then
-                        local okA, asset = pcall(function()
-                            return getcustomasset(imgFile)
+                        if not have then
+                            local okD, data = pcall(function()
+                                if type(http_request) == "function" then
+                                    return http_request({
+                                        Url = v.url, Method = "GET" })
+                                end
+                                return request({
+                                    Url = v.url, Method = "GET" })
+                            end)
+                            if okD and data and data.Body
+                               and #data.Body > 500 then
+                                pcall(function()
+                                    writefile(v.file, data.Body)
+                                end)
+                                bgLog("downloaded " .. v.file
+                                    .. " " .. #data.Body .. " bytes")
+                            end
+                        end
+                        local okI2, exists2 = pcall(function()
+                            return isfile(v.file)
                         end)
-                        if okA and type(asset) == "string" then
-                            bgSrc = asset
-                            bgLog("PHOTO from GitHub OK")
-                        else
-                            bgLog("getcustomasset on jpg FAILED: "
-                                .. tostring(asset))
+                        if okI2 and exists2 then
+                            local okA, asset = pcall(function()
+                                return getcustomasset(v.file)
+                            end)
+                            if okA and type(asset) == "string" then
+                                bgSrc = asset
+                                bgLog("PHOTO OK: " .. v.file)
+                                break
+                            end
                         end
+                        if bgSrc then break end
                     end
                 end)
             end
@@ -2515,7 +2516,9 @@ do
                                     local AS = game
                                         :GetService("AssetService")
                                     local ei = AS:CreateEditableImageAsync(
-                                        Content.fromUri(bgImgURL))
+                                        Content.fromUri(
+                                            "https://raw.githubusercontent.com/"
+                                            .. "blegbot1/PrisonESP/main/pe_bg.png"))
                                     bgImage.Content =
                                         Content.fromObject(ei)
                                     bgLog("EditableImage applied")
@@ -4108,9 +4111,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.94 stopped")
+    print("[PE] v2.95 stopped")
 end
 
-print("[PE] v2.94 started (Combat-only, PeUI built-in)"
+print("[PE] v2.95 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
