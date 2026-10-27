@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.83  (Combat-only: PeUI + admin theatre + fire)
+--  PRISON ESP  v2.84  (Combat-only: PeUI + admin theatre full)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1245,6 +1245,140 @@ G.PE.SoundBoard = function(soundId)
     print("[PE SBD] sound " .. id .. " relayed to the whole server")
 end
 
+-- ORBITAL BEAM: гигантский неоновый луч с неба в цель (толстый трейл
+-- через релей VisualizeBullet — видно ВСЕМ) + поджог цели. Со стороны —
+-- орбитальный удар, как будто сервер тебя карает.
+G.PE.OrbitalBeam = function(namePart)
+    local nowS = os.clock()
+    if nowS - (G._orbAt or 0) < 12 then
+        print("[PE ORB] cooldown (" ..
+            string.format("%.1f", 12 - (nowS - (G._orbAt or 0))) .. "s)")
+        return
+    end
+    local chr = LP.Character
+    local rootS = chr and chr:FindFirstChild("HumanoidRootPart")
+    if not rootS then print("[PE ORB] no character") return end
+    local tool = chr:FindFirstChildOfClass("Tool")
+    if not tool then
+        print("[PE ORB] take any gun in hands (relay source)")
+        return
+    end
+    local gsl = tool:FindFirstChild("GunScript_Local")
+    local vb = tool:FindFirstChild("VisualizeBullet")
+    local handle = tool:FindFirstChild("Handle")
+    if not (gsl and vb and handle) then
+        print("[PE ORB] " .. tool.Name .. " has no VisualizeBullet")
+        return
+    end
+    local target, targetIsPlayer = nil, false
+    if namePart then
+        local p = findPlayer(tostring(namePart))
+        local headF = p and p.Character
+            and p.Character:FindFirstChild("Head")
+        if headF then
+            target = headF.Position
+            targetIsPlayer = true
+        end
+    end
+    if not target then
+        local m = LP:GetMouse()
+        target = m and m.Hit and m.Hit.Position
+    end
+    if not target then
+        print("[PE ORB] no target position")
+        return
+    end
+    local homeCF = rootS.CFrame
+    G._orbAt = nowS
+    task.spawn(function()
+        pcall(function()
+            rootS.CFrame = CFrame.new(target + Vector3.new(0, 250, 0))
+        end)
+        task.wait(0.1)
+        pcall(function()
+            vb:FireServer(handle, Vector3.new(0, 0.625, 1.25), target,
+                gsl:FindFirstChild("MuzzleEffect"),
+                gsl:FindFirstChild("HitEffect"),
+                186809061,
+                { false, 8, 0 },
+                { 60, Vector3.new(6, 6, 500),
+                    BrickColor.new("Bright red").Color, 0.05,
+                    Enum.Material.Neon, 0.6 },
+                true, false)
+        end)
+        -- Карательный финал: цель-игрок вспыхивает (1 урона + огонь).
+        if targetIsPlayer then
+            local pF = findPlayer(tostring(namePart))
+            local humF = pF and pF.Character
+                and pF.Character:FindFirstChildOfClass("Humanoid")
+            local headF = pF and pF.Character
+                and (pF.Character:FindFirstChild("Head")
+                    or pF.Character:FindFirstChild("HumanoidRootPart"))
+            local remoteF = myGunRemote("InflictTarget")
+            if humF and headF and humF.Health > 0 and remoteF then
+                pcall(function()
+                    remoteF:FireServer(humF, headF, 1,
+                        Vector3.new(0, 1, 0), 0, 0, true)
+                end)
+            end
+        end
+        task.wait(0.35)
+        pcall(function()
+            local rB = LP.Character
+                and LP.Character:FindFirstChild("HumanoidRootPart")
+            if rB then rB.CFrame = homeCF end
+        end)
+    end)
+    print("[PE ORB] orbital beam -> " .. tostring(target))
+end
+
+-- LEVITATE: плавная левитация на глазах у всех — всплываешь на 9
+-- стадов, висишь 3с, плавно возвращаешься. Физика наша (клиентская),
+-- позиция реплицируется — все видят «антигравитацию админа».
+G.PE.Levitate = function()
+    local nowS = os.clock()
+    if nowS - (G._levAt or 0) < 12 then
+        print("[PE LEV] cooldown (" ..
+            string.format("%.1f", 12 - (nowS - (G._levAt or 0))) .. "s)")
+        return
+    end
+    local chr = LP.Character
+    local root = chr and chr:FindFirstChild("HumanoidRootPart")
+    local hum = chr and chr:FindFirstChildOfClass("Humanoid")
+    if not (root and hum) or hum.Health <= 0 then
+        print("[PE LEV] no character")
+        return
+    end
+    if CFG.Apocalypse then
+        print("[PE LEV] paused while APOCALYPSE runs (anchor conflict)")
+        return
+    end
+    G._levAt = nowS
+    task.spawn(function()
+        local base = root.CFrame
+        pcall(function() root.Anchored = true end)
+        -- Плавный подъём (8 шагов по 0.15с).
+        for i = 1, 8 do
+            pcall(function()
+                root.CFrame = base + Vector3.new(0, i * 1.1, 0)
+            end)
+            task.wait(0.15)
+        end
+        task.wait(3)
+        -- Плавный спуск.
+        for i = 8, 1, -1 do
+            pcall(function()
+                root.CFrame = base + Vector3.new(0, i * 1.1, 0)
+            end)
+            task.wait(0.12)
+        end
+        pcall(function()
+            root.CFrame = base
+            root.Anchored = false
+        end)
+    end)
+    print("[PE LEV] levitation show started")
+end
 -- Декомпиляция скриптов пушки: по исходникам GunScript_Local видно,
 -- с какими аргументами игра честно стреляет InflictTarget.
 G.PE.GunSource = function()
@@ -3448,6 +3582,12 @@ local okGUI, errGUI = pcall(function()
         Callback = function() G.PE.SkyShot(CFG.KillAuraTeam) end })
     C:CreateButton({ Name = "SQUAD SHOT at cursor (5 angles)",
         Callback = function() G.PE.SquadShot() end })
+    C:CreateButton({ Name = "ORBITAL BEAM at cursor (giant laser)",
+        Callback = function() G.PE.OrbitalBeam() end })
+    C:CreateButton({ Name = "ORBITAL BEAM at selected player",
+        Callback = function() G.PE.OrbitalBeam(CFG.KillAuraTeam) end })
+    C:CreateButton({ Name = "LEVITATE (float in front of everyone)",
+        Callback = function() G.PE.Levitate() end })
     C:CreateSection("Sound board (whole server hears)")
     C:CreateParagraph({ Title = "Sound board",
         Content = "Relays ANY Roblox sound id to EVERY player (invisible beam). Paste an id from the toolbox, press PLAY. 8s cooldown. Gunshot 186809061 is verified; other ids are whatever you find." })
@@ -3872,7 +4012,7 @@ G.PE_Stop = function()
     G.PE.WearOutfit, G.PE.ShopInfo = nil, nil
     G.PE.GunSource, G.PE.TP, G.PE.Cuff, G.PE.ModGun = nil, nil, nil, nil
     G.PE.FakeShot, G.PE.SkyShot, G.PE.SquadShot = nil, nil, nil
-    G.PE.SoundBoard = nil
+    G.PE.SoundBoard, G.PE.OrbitalBeam, G.PE.Levitate = nil, nil, nil
     G.PE.WP_Save, G.PE.WP_TP, G.PE.TPCrosshair = nil, nil, nil
     G.PE.EnsureWeapon, G.PE.HasWeapon = nil, nil
     G.PE.ApocGunName = nil
@@ -3913,9 +4053,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.83 stopped")
+    print("[PE] v2.84 stopped")
 end
 
-print("[PE] v2.83 started (Combat-only, PeUI built-in)"
+print("[PE] v2.84 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
