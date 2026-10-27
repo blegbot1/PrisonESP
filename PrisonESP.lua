@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v3.06  (Combat-only: PeUI + живой язык, минимал-анимации)
+--  PRISON ESP  v3.07  (Combat-only: PeUI + друзья/враги)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -56,6 +56,11 @@ CFG.KillAuraDelay  = tonumber(CFG.KillAuraDelay) or 0.15
 CFG.KillAuraTeam   = (type(CFG.KillAuraTeam) == "string"
     and CFG.KillAuraTeam ~= "")
     and CFG.KillAuraTeam or "Everyone"
+-- ДРУЗЬЯ И ВРАГИ (вкладка Friends): [UserId] = true. Применяются
+-- ВЕЗДЕ: аура, c00lkidd, fire aura, ретрибуция, APOC — друзей никто
+-- не трогает, враги всегда валидные цели.
+CFG.Friends = CFG.Friends or {}
+CFG.Enemies = CFG.Enemies or {}
 -- АНТИ-СТАН: тазер/наручники/регдолл не должны останавливать.
 CFG.AntiStun = CFG.AntiStun ~= false
 -- Урон килл-ауры и бесконечные патроны. Подписура InflictTarget взята
@@ -1405,8 +1410,12 @@ G.PE.GunSource = function()
 end
 
 -- Цель: «Everyone» или ник конкретного игрока (списки с игроками).
+-- v3.07: ДРУЗЬЯ И ВРАГИ применяются везде — друг никогда не тронут,
+-- враг всегда валидная цель (даже свой по команде: пусть сервер режет).
 -- Тим-фильтр: сервер урон по тиммейтам режет — не тратить слоты.
 local function targetAllowed(p, sel, myTeam)
+    if CFG.Enemies[p.UserId] then return true end
+    if CFG.Friends[p.UserId] then return false end
     if myTeam and p.Team == myTeam then return false end
     if sel == nil or sel == "" or sel == "Everyone" then return true end
     return p.Name == sel or p.DisplayName == sel
@@ -1481,7 +1490,9 @@ local function lastShooter()
         if now - t > SHOT_MEMORY then
             recentShots[p] = nil
         elseif p.Parent and (not bestT or t > bestT) then
-            if noFilter or p.Team ~= LP.Team then
+            -- Друзья исключены из ретрибуции всегда.
+            if (noFilter or p.Team ~= LP.Team)
+               and not CFG.Friends[p.UserId] then
                 bestP, bestT = p, t
             end
         end
@@ -1492,10 +1503,11 @@ end
 -- Поиск атакующего: сначала точная атрибуция по недавним выстрелам
 -- (окно стыковки «выстрел → просадка HP» всего 1с — перекрёстный огонь
 -- и чужие фейк-трассеры не должны стать «атакующим»), фолбэк —
--- старая эвристика (ближайший, вооружённые −30 стадов).
+-- старая эвристика (ближайший, вооружённые −30 стадов). Друзья — нет.
 local function findAttacker(myRoot)
     local shooter, shotAt = lastShooter()
-    if shooter and os.clock() - shotAt <= 1 then
+    if shooter and os.clock() - shotAt <= 1
+       and not CFG.Friends[shooter.UserId] then
         local ch = shooter.Character
         local hum = ch and ch:FindFirstChildOfClass("Humanoid")
         if hum and hum.Health > 0 then
@@ -1504,7 +1516,7 @@ local function findAttacker(myRoot)
     end
     local bestP, bestS
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LP then
+        if p ~= LP and not CFG.Friends[p.UserId] then
             local ch = p.Character
             local hum = ch and ch:FindFirstChildOfClass("Humanoid")
             local root = ch and ch:FindFirstChild("HumanoidRootPart")
@@ -1766,7 +1778,8 @@ local function auraTick()
                             tonumber(CFG.ApocDamage) or 100, 1, 200)
                         local hitsA = 0
                         for _, p2 in ipairs(Players:GetPlayers()) do
-                            if p2 ~= LP and p2.Team ~= LP.Team and hitsA < 20 then
+                            if p2 ~= LP and p2.Team ~= LP.Team
+       and not CFG.Friends[p2.UserId] and hitsA < 20 then
                                 local ch2 = p2.Character
                                 local h2 = ch2
                                     and ch2:FindFirstChildOfClass("Humanoid")
@@ -2623,13 +2636,12 @@ do
                 local p = activePopup
                 activePopup = nil
                 tween(p, { BackgroundTransparency = 1 }, 0.12)
+                -- v3.07: НИКОГДА не уничтожаем попап (Destroy + гонки с
+                -- переоткрытием = «дропдаун перестаёт открываться» после
+                -- долгой игры). Скрываем: инстанс живёт вечно, память —
+                -- копейки, reopen работает всегда.
                 task.delay(0.13, function()
-                    -- Гард: попап могли ПЕРЕОТКРЫТЬ (клик по строке)
-                    -- — тогда отложенный destroy убивал живой список
-                    -- и дропдаун ломался навсегда.
-                    if activePopup ~= p then
-                        pcall(function() p:Destroy() end)
-                    end
+                    p.Visible = false
                 end)
             end
         end
@@ -3218,6 +3230,123 @@ do
                 return nil
             end
 
+            -- СПИСОК ИГРОКОВ (вкладка Friends): аватар + имя + команда +
+            -- статус (враг/друг). Клик по строке — цикл статуса.
+            -- Перестраивается при изменении состава игроков.
+            function tabObj:CreatePlayerList(getState, onCycle)
+                local list = mk("ScrollingFrame", {
+                    Size = UDim2.new(1, 0, 0, 400),
+                    BackgroundTransparency = 1,
+                    BorderSizePixel = 0,
+                    CanvasSize = UDim2.new(0, 0, 0, 0),
+                    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+                    ScrollingDirection = Enum.ScrollingDirection.Y,
+                    ScrollBarThickness = 3,
+                    ScrollBarImageColor3 = THEME.Accent,
+                    LayoutOrder = ord(),
+                }, pageFrame)
+                mk("UIListLayout", {
+                    Padding = UDim.new(0, 6),
+                    SortOrder = Enum.SortOrder.LayoutOrder,
+                }, list)
+                local lastSig = ""
+                local function rebuild(force)
+                    local pls = Players:GetPlayers()
+                    table.sort(pls, function(a, b)
+                        return a.Name < b.Name
+                    end)
+                    local sig = ""
+                    for _, p in ipairs(pls) do
+                        sig = sig .. p.Name .. ";"
+                    end
+                    if not force and sig == lastSig then return end
+                    lastSig = sig
+                    for _, c in ipairs(list:GetChildren()) do
+                        if not c:IsA("UIListLayout") then
+                            pcall(function() c:Destroy() end)
+                        end
+                    end
+                    for _, p in ipairs(pls) do
+                        if p ~= LP then
+                            local st = getState(p)
+                            local rowColor = st == "enemy"
+                                and Color3.fromRGB(70, 20, 20)
+                                or st == "friend"
+                                and Color3.fromRGB(18, 58, 28)
+                                or THEME.Element
+                            local row = mk("TextButton", {
+                                AutoButtonColor = false,
+                                Text = "",
+                                Size = UDim2.new(1, 0, 0, 44),
+                                BackgroundColor3 = rowColor,
+                                BorderSizePixel = 0,
+                            }, list)
+                            corner(9, row)
+                            stroke(THEME.StrokeSoft, 1, row)
+                            local av = mk("ImageLabel", {
+                                Size = UDim2.new(0, 36, 0, 36),
+                                Position = UDim2.new(0, 4, 0.5, -18),
+                                BackgroundColor3 = THEME.InputBg,
+                                Image = "rbxthumb://type=AvatarHeadShot&id="
+                                    .. p.UserId .. "&w=150&h=150",
+                                BorderSizePixel = 0,
+                            }, row)
+                            corner(18, av)
+                            mk("TextLabel", {
+                                BackgroundTransparency = 1,
+                                Position = UDim2.new(0, 48, 0, 4),
+                                Size = UDim2.new(0.5, -60, 0, 16),
+                                Font = FONT,
+                                TextSize = 14,
+                                TextColor3 = THEME.Text,
+                                TextXAlignment = Enum.TextXAlignment.Left,
+                                TextTruncate = Enum.TextTruncate.AtEnd,
+                                Text = p.DisplayName .. " (@" .. p.Name .. ")",
+                            }, row)
+                            mk("TextLabel", {
+                                BackgroundTransparency = 1,
+                                Position = UDim2.new(0, 48, 0, 22),
+                                Size = UDim2.new(0.5, -60, 0, 14),
+                                Font = FONT,
+                                TextSize = 12,
+                                TextColor3 = THEME.TextDim,
+                                TextXAlignment = Enum.TextXAlignment.Left,
+                                TextTruncate = Enum.TextTruncate.AtEnd,
+                                Text = p.Team and ("Team: " .. p.Team.Name)
+                                    or "Team: -",
+                            }, row)
+                            local badge = mk("TextLabel", {
+                                AnchorPoint = Vector2.new(1, 0.5),
+                                Position = UDim2.new(1, -10, 0.5, 0),
+                                Size = UDim2.new(0, 90, 0, 20),
+                                BackgroundTransparency = 1,
+                                Font = FONT,
+                                TextSize = 13,
+                                TextXAlignment = Enum.TextXAlignment.Right,
+                                TextColor3 = st == "enemy"
+                                    and Color3.fromRGB(255, 90, 90)
+                                    or st == "friend"
+                                    and Color3.fromRGB(120, 255, 140)
+                                    or THEME.TextDim,
+                                Text = st == "enemy" and tr("ENEMY")
+                                    or st == "friend" and tr("FRIEND")
+                                    or "-",
+                            }, row)
+                            PeUI._texts[badge] = st == "enemy" and "ENEMY"
+                                or st == "friend" and "FRIEND" or nil
+                            keep(row.MouseButton1Click:Connect(function()
+                                onCycle(p)
+                                rebuild(true)
+                            end))
+                        end
+                    end
+                end
+                rebuild()
+                -- Хук для 5-секундного цикла PrisonESP (смена игроков).
+                PeUI._listRefresh = function() pcall(rebuild) end
+                return list
+            end
+
             function tabObj:CreateInput(data)
                 data = data or {}
                 local r = newRow(34)
@@ -3353,6 +3482,11 @@ local okGUI, errGUI = pcall(function()
     end)
     local PE_RU = {
         ["Toggle switches the ENTIRE menu language instantly - no restart needed."] = "Тумблер переключает язык ВСЕГО меню мгновенно - без перезагрузки скрипта.",
+        ["Friends"] = "Друзья",
+        ["Friends & enemies"] = "Друзья и враги",
+        ["ENEMY"] = "ВРАГ",
+        ["FRIEND"] = "ДРУГ",
+        ["Click a player row to cycle: none -> ENEMY -> FRIEND. Enemies are ALWAYS valid targets for aura/c00lkidd/fire aura (even teammates). Friends are NEVER touched by anything: aura, fire, retribution, apocalypse. Applied everywhere."] = "Клик по игроку переключает: никто -> ВРАГ -> ДРУГ. Враги - ВСЕГДА валидные цели для ауры/c00lkidd/огня (даже тиммейты). Друзей не трогает НИЧТО: аура, огонь, ретрибуция, апокалипсис. Применяется везде.",
         ["Kill aura (InflictTarget)"] = "Килл-аура (InflictTarget)",
         ["Gun upgrade"] = "Прокачка пушки",
         ["C00LKIDD MODE (2014)"] = "РЕЖИМ C00LKIDD (2014)",
@@ -3729,6 +3863,31 @@ local okGUI, errGUI = pcall(function()
         CurrentValue = CFG.AntiStun ~= false,
         Callback = function(v) CFG.AntiStun = v end })
 
+    C = safeNewTab(W, "Friends", "users", "Friends")
+    if not C then error("Friends tab failed") end
+    C:CreateSection("Friends & enemies")
+    C:CreateParagraph({ Title = "Friends & enemies",
+        Content = "Click a player row to cycle: none -> ENEMY -> FRIEND. Enemies are ALWAYS valid targets for aura/c00lkidd/fire aura (even teammates). Friends are NEVER touched by anything: aura, fire, retribution, apocalypse. Applied everywhere." })
+    C:CreatePlayerList(
+        function(p)
+            if CFG.Enemies[p.UserId] then return "enemy" end
+            if CFG.Friends[p.UserId] then return "friend" end
+            return "none"
+        end,
+        function(p)
+            if CFG.Enemies[p.UserId] then
+                CFG.Enemies[p.UserId] = nil
+                CFG.Friends[p.UserId] = true
+                print("[PE FRIENDS] " .. p.Name .. " -> FRIEND")
+            elseif CFG.Friends[p.UserId] then
+                CFG.Friends[p.UserId] = nil
+                print("[PE FRIENDS] " .. p.Name .. " -> neutral")
+            else
+                CFG.Enemies[p.UserId] = true
+                print("[PE FRIENDS] " .. p.Name .. " -> ENEMY")
+            end
+        end)
+
     C = safeNewTab(W, "Items", "package", "Items")
     if not C then error("Items tab failed") end
     C:CreateSection("Weapon giver (click detectors)")
@@ -3960,6 +4119,9 @@ end
 
 -- targetPickers объявлен выше, до GUI-блока.
 local function refreshTargetPickers()
+    -- Динамические списки PeUI (вкладка Friends): перестройка при
+    -- изменении состава игроков (внутри — проверка на изменения).
+    if PeUI and PeUI._listRefresh then pcall(PeUI._listRefresh) end
     local opts = playerOpts()
     for _, d in ipairs(targetPickers) do
         -- Внимание: в Rayfield обновление списка — :Refresh (а :Set
@@ -4064,9 +4226,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v3.06 stopped")
+    print("[PE] v3.07 stopped")
 end
 
-print("[PE] v3.06 started (Combat-only, PeUI built-in)"
+print("[PE] v3.07 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
