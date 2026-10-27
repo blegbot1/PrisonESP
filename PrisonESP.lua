@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v3.01  (Combat-only: PeUI + сверхширокий фон x4.2)
+--  PRISON ESP  v3.02  (Combat-only: PeUI + компактный фон)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2477,16 +2477,14 @@ do
                 -- рабочий Image пустым Content'ом.
                 local bgImage = mk("ImageLabel", {
                     Name = "BgPhoto",
-                    AnchorPoint = Vector2.new(0.5, 0),
-                    Position = UDim2.new(0.5, 0, 0, 0),
-                    Size = UDim2.new(4.2, 0, 1, 0),
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.new(0.5, 0, 0.5, 0),
+                    Size = UDim2.new(0.55, 0, 0.75, 0),
                     BackgroundTransparency = 1,
                     Image = "",
                     ImageTransparency = 0,
-                    -- ШИРЕ: Stretch на области 140% ширины окна -
-                    -- человечек растягивается по горизонтали сильнее,
-                    -- по центру, края уходят за окно.
-                    ScaleType = Enum.ScaleType.Stretch,
+                    -- МЕНЬШЕ: равномерный фит по центру, ~75% высоты.
+                    ScaleType = Enum.ScaleType.Fit,
                     BorderSizePixel = 0,
                 }, root)
                 PeUI._bgImage = bgImage
@@ -4072,9 +4070,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v3.01 stopped")
+    print("[PE] v3.02 stopped")
 end
 
-print("[PE] v3.01 started (Combat-only, PeUI built-in)"
+print("[PE] v3.02 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
