@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v3.07  (Combat-only: PeUI + друзья/враги)
+--  PRISON ESP  v3.08  (Combat-only: PeUI + макс-частота хила)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1851,14 +1851,16 @@ local function auraTick()
             -- принимает): 0.1с при уроне, 0.25с в бою — HP держится
             -- у максимума даже под непрерывным огнём.
             local inCombat = lastShooter() ~= nil
-            local cadence = damaged and 0.05 or (inCombat and 0.25 or 0.5)
+            -- v3.08: КАЖДЫЙ КАДР при уроне (~16 мс — физический максимум,
+            -- 1000 пакетов/с технически невозможны и являются флудом).
+            local cadence = damaged and 0 or (inCombat and 0.25 or 0.5)
             if now - immortalAt >= cadence then
                 immortalAt = now
                 pcall(function()
                     remoteI:FireServer(humI, rootI, 0,
                         Vector3.new(0, 0, 1), 0, 1000000, false)
                 end)
-                local tapGap = damaged and 0.1 or 0.25
+                local tapGap = damaged and 0.05 or 0.25
                 if (damaged or inCombat)
                    and now - immortalTapAt >= tapGap then
                     immortalTapAt = now
@@ -4226,9 +4228,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v3.07 stopped")
+    print("[PE] v3.08 stopped")
 end
 
-print("[PE] v3.07 started (Combat-only, PeUI built-in)"
+print("[PE] v3.08 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
