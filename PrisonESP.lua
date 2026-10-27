@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v3.05  (Combat-only: PeUI + фиксированный фон, без перча)
+--  PRISON ESP  v3.06  (Combat-only: PeUI + живой язык, минимал-анимации)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2136,7 +2136,7 @@ do
 
     local function tween(inst, props, t)
         local tw = TweenService:Create(inst,
-            TweenInfo.new(t or TT, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            TweenInfo.new(t or TT, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
             props)
         tw:Play()
         return tw
@@ -2196,6 +2196,28 @@ do
         local ok, err = pcall(fn, ...)
         if not ok then
             warn("[PE UI] callback: " .. tostring(err))
+        end
+    end
+
+    -- Реестр переводимых текстов: [объект] = оригинальная строка.
+    -- Язык переключается ЖИВО (PeUI.ApplyLanguage) - без перезагрузки
+    -- скрипта. Слабые ключи: уничтоженные элементы не копятся.
+    PeUI._texts = setmetatable({}, { __mode = "k" })
+    PeUI.Lang = "en"
+    local function setText(obj, orig)
+        obj.Text = tr(orig)
+        PeUI._texts[obj] = orig
+        return obj
+    end
+    function PeUI.ApplyLanguage()
+        for obj, orig in pairs(PeUI._texts) do
+            if obj and obj.Parent then
+                if obj:IsA("TextBox") then
+                    obj.PlaceholderText = tr(orig)
+                else
+                    obj.Text = tr(orig)
+                end
+            end
         end
     end
 
@@ -2352,6 +2374,13 @@ do
         }, sg)
         corner(12, root)
         stroke(THEME.Stroke, 1, root)
+        -- Минималистичное появление окна: лёгкий масштаб 0.97 -> 1.
+        do
+            local openScale = Instance.new("UIScale")
+            openScale.Scale = 0.97
+            openScale.Parent = root
+            tween(openScale, { Scale = 1 }, 0.22)
+        end
 
         -- BACKGROUND PHOTO: uploaded to Roblox as a decal
         -- (ID 93512518437052, account kitichek4ek). The decal loads
@@ -2492,7 +2521,7 @@ do
             Active = true,
         }, root)
         corner(12, top)
-        mk("TextLabel", {
+        local titleLabel = mk("TextLabel", {
             BackgroundTransparency = 1,
             Position = UDim2.new(0, 14, 0, 0),
             Size = UDim2.new(1, -110, 1, 0),
@@ -2502,6 +2531,7 @@ do
             TextXAlignment = Enum.TextXAlignment.Left,
             Text = tr(tostring(opts.Name or "PE UI")),
         }, top)
+        PeUI._texts[titleLabel] = tostring(opts.Name or "PE UI")
 
         local minBtn = mk("TextButton", {
             AutoButtonColor = false,
@@ -2655,6 +2685,7 @@ do
                 Text = tr(tostring(name)),
                 BorderSizePixel = 0,
             }, tabRow)
+            PeUI._texts[btn] = tostring(name)
             corner(8, btn)
             pad(btn, 0, 0, 12, 12)
             local bar = mk("Frame", {
@@ -2742,6 +2773,8 @@ do
                     TextXAlignment = Enum.TextXAlignment.Left,
                     Text = tr(tostring(name)),
                 }, holder)
+                PeUI._texts[holder:FindFirstChildOfClass("TextLabel")] =
+                    tostring(name)
                 return nil
             end
 
@@ -2762,7 +2795,7 @@ do
                     Padding = UDim.new(0, 3),
                     SortOrder = Enum.SortOrder.LayoutOrder,
                 }, card)
-                mk("TextLabel", {
+                local pTitle = mk("TextLabel", {
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, 0),
                     AutomaticSize = Enum.AutomaticSize.Y,
@@ -2774,7 +2807,8 @@ do
                     Text = tr(tostring(data.Title or "")),
                     LayoutOrder = 1,
                 }, card)
-                mk("TextLabel", {
+                PeUI._texts[pTitle] = tostring(data.Title or "")
+                local pContent = mk("TextLabel", {
                     BackgroundTransparency = 1,
                     Size = UDim2.new(1, 0, 0, 0),
                     AutomaticSize = Enum.AutomaticSize.Y,
@@ -2786,13 +2820,16 @@ do
                     Text = tr(tostring(data.Content or "")),
                     LayoutOrder = 2,
                 }, card)
+                PeUI._texts[pContent] = tostring(data.Content or "")
                 return nil
             end
 
             function tabObj:CreateToggle(data)
                 data = data or {}
                 local r = newRow(34)
-                nameLabel(r, 0.6).Text = tr(tostring(data.Name or ""))
+                local nameT = nameLabel(r, 0.6)
+                nameT.Text = tr(tostring(data.Name or ""))
+                PeUI._texts[nameT] = tostring(data.Name or "")
                 local pill = mk("Frame", {
                     AnchorPoint = Vector2.new(1, 0.5),
                     Position = UDim2.new(1, -10, 0.5, 0),
@@ -2857,6 +2894,7 @@ do
                     TextTruncate = Enum.TextTruncate.AtEnd,
                     Text = tr(tostring(data.Name or "")),
                 }, r)
+                PeUI._texts[nl] = tostring(data.Name or "")
                 local val = mk("TextLabel", {
                     AnchorPoint = Vector2.new(1, 0),
                     Position = UDim2.new(1, -10, 0, 4),
@@ -2959,7 +2997,9 @@ do
             function tabObj:CreateDropdown(data)
                 data = data or {}
                 local r = newRow(34)
-                nameLabel(r, 0.55).Text = tr(tostring(data.Name or ""))
+                local nameD = nameLabel(r, 0.55)
+                nameD.Text = tr(tostring(data.Name or ""))
+                PeUI._texts[nameD] = tostring(data.Name or "")
                 local sel = mk("TextLabel", {
                     AnchorPoint = Vector2.new(1, 0.5),
                     Position = UDim2.new(1, -26, 0.5, 0),
@@ -3165,6 +3205,7 @@ do
                 r.TextSize = 14
                 r.TextColor3 = THEME.Text
                 r.Text = tr(tostring(data.Name or ""))
+                PeUI._texts[r] = tostring(data.Name or "")
                 keep(r.MouseButton1Click:Connect(function()
                     tween(r, { BackgroundColor3 = THEME.Accent }, 0.1)
                     task.delay(0.12, function()
@@ -3191,6 +3232,7 @@ do
                     TextTruncate = Enum.TextTruncate.AtEnd,
                     Text = tr(tostring(data.Name or "")),
                 }, r)
+                PeUI._texts[nl] = tostring(data.Name or "")
                 local box = mk("TextBox", {
                     AnchorPoint = Vector2.new(1, 0.5),
                     Position = UDim2.new(1, -10, 0.5, 0),
@@ -3310,6 +3352,7 @@ local okGUI, errGUI = pcall(function()
         if getgenv().PE_LANG == "ru" then PE_LANG = "ru" end
     end)
     local PE_RU = {
+        ["Toggle switches the ENTIRE menu language instantly - no restart needed."] = "Тумблер переключает язык ВСЕГО меню мгновенно - без перезагрузки скрипта.",
         ["Kill aura (InflictTarget)"] = "Килл-аура (InflictTarget)",
         ["Gun upgrade"] = "Прокачка пушки",
         ["C00LKIDD MODE (2014)"] = "РЕЖИМ C00LKIDD (2014)",
@@ -3743,38 +3786,18 @@ local okGUI, errGUI = pcall(function()
     if ST then
         ST:CreateSection("Language / Язык")
         ST:CreateParagraph({ Title = "Language",
-            Content = "Pick a language and press RESTART - the script reloads itself with the translated menu. EN: labels in English. RU: подписи меню на русском. Language survives script restarts." })
-        ST:CreateDropdown({
-            Name = "Menu language / Язык меню",
-            Flag = "PE_LANGPick",
-            Options = { "English", "Русский" },
-            CurrentOption = {
-                PE_LANG == "ru" and "Русский" or "English" },
-            MultipleOptions = false,
-            Callback = function(selected)
-                local picked = selected
-                if type(picked) == "table" then picked = picked[1] end
-                if picked == "Русский" then
-                    getgenv().PE_LANG = "ru"
-                else
-                    getgenv().PE_LANG = "en"
-                end
-                print("[PE] language = " .. tostring(picked)
-                    .. " - press RESTART SCRIPT to apply")
-            end,
-        })
-        ST:CreateButton({ Name = "RESTART SCRIPT (apply language)",
-            Callback = function()
-                print("[PE] restarting with new language...")
-                loadstring(game:HttpGet(
-                    "https://raw.githubusercontent.com/blegbot1/PrisonESP/main/PrisonESP.lua",
-                    true))()
-            end })
-        ST:CreateButton({ Name = "UNLOAD script (full cleanup)",
-            Callback = function()
-                print("[PE] unloading...")
-                local stop = G.PE_Stop
-                if stop then stop() end
+            Content = "Toggle switches the ENTIRE menu language instantly - no restart needed." })
+        ST:CreateToggle({ Name = "Русский язык (RU)",
+            Flag = "PE_LangToggle",
+            CurrentValue = PE_LANG == "ru",
+            Callback = function(v)
+                -- Живое переключение: реестр PeUI._texts перетекстовывает
+                -- все подписи сразу, без перезагрузки скрипта.
+                PE_LANG = v and "ru" or "en"
+                getgenv().PE_LANG = PE_LANG
+                PeUI.Lang = PE_LANG
+                PeUI.ApplyLanguage()
+                print("[PE] language = " .. PE_LANG .. " (applied live)")
             end })
         ST:CreateSection("Info")
         ST:CreateInput({ Name = "Photo decal ID (background)",
@@ -4041,9 +4064,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v3.05 stopped")
+    print("[PE] v3.06 stopped")
 end
 
-print("[PE] v3.05 started (Combat-only, PeUI built-in)"
+print("[PE] v3.06 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
