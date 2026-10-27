@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.93  (Combat-only: PeUI + фото с GitHub)
+--  PRISON ESP  v2.94  (Combat-only: PeUI + admin theatre full)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2393,6 +2393,8 @@ do
             local bgLog = function(step)
                 print("[PE UI] bg: " .. step)
             end
+            local bgImgURL = "https://raw.githubusercontent.com/"
+                .. "blegbot1/PrisonESP/main/pe_bg.jpg"
             local bgSrc = nil
             -- v2.93: ФОТО С GITHUB через request/http_request (сырой
             -- Body). game:HttpGet портит бинарные данные текстовым
@@ -2402,8 +2404,7 @@ do
                or type(http_request) == "function" then
                 pcall(function()
                     local imgFile = "pe_bg_img.jpg"
-                    local imgURL = "https://raw.githubusercontent.com/"
-                        .. "blegbot1/PrisonESP/main/pe_bg.jpg"
+                    local imgURL = bgImgURL
                     local have = false
                     if type(isfile) == "function" then
                         local okI, exists = pcall(function()
@@ -2492,10 +2493,12 @@ do
                 PeUI._bgPanel = panel
                 PeUI._bgImage = bgImage
                 -- Диагностика + терпение: новый декал может пройти
-                -- модерацию с задержкой — проверяем 3 раза (2.5/7.5/15с)
-                -- и только потом сдаёмся.
+                -- модерацию с задержкой — проверяем 3 раза (2.5/7.5/15с).
+                -- Перед сдачей — попытка №3: EditableImage (новый Roblox
+                -- API, качает URL в память БЕЗ getcustomasset).
                 task.delay(2.5, function()
                     pcall(function()
+                        local triedEditable = false
                         for _, extra in ipairs({ 0, 5, 7.5 }) do
                             if extra > 0 then task.wait(extra) end
                             local rs = bgImage.ImageRectSize
@@ -2505,6 +2508,22 @@ do
                             if rs.X >= 2 and rs.Y >= 2 then
                                 print("[PE UI] bg: PHOTO IS VISIBLE")
                                 return
+                            end
+                            if not triedEditable then
+                                triedEditable = true
+                                pcall(function()
+                                    local AS = game
+                                        :GetService("AssetService")
+                                    local ei = AS:CreateEditableImageAsync(
+                                        Content.fromUri(bgImgURL))
+                                    bgImage.Content =
+                                        Content.fromObject(ei)
+                                    bgLog("EditableImage applied")
+                                end)
+                                if bgImage.Content ~= nil
+                                   and bgImage.Content ~= "" then
+                                    return
+                                end
                             end
                         end
                         local manual = getgenv().PE_BG_ID
@@ -4089,9 +4108,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.93 stopped")
+    print("[PE] v2.94 stopped")
 end
 
-print("[PE] v2.93 started (Combat-only, PeUI built-in)"
+print("[PE] v2.94 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
