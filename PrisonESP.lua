@@ -155,6 +155,27 @@ local UIS = game:GetService("UserInputService")
 local PE_BURN_AT = setmetatable({}, { __mode = "k" })
 local PE_FLING_AT = setmetatable({}, { __mode = "k" })
 
+-- UserId админов, вшитые в LocalScript админ-панели игры (u45) +
+-- создатель игры (CreatorId). v2.72-2.78: блок случайно выпал при
+-- вырезке ESP — детектор админов молчал, вернуть на место.
+local PE_ADMINS = {
+    [86513279] = true, [4008579942] = true,
+    [4865533262] = true, [66120198] = true,
+}
+local PE_CREATOR_ID = 0
+pcall(function() PE_CREATOR_ID = tonumber(game.CreatorId) or 0 end)
+local PE_IS_GROUP = false
+pcall(function()
+    PE_IS_GROUP = game.CreatorType == Enum.CreatorType.Group
+end)
+local function isAdminP(p)
+    if PE_ADMINS[p.UserId] then return true end
+    -- Если игру паблишила группа, CreatorId — id ГРУППЫ: совпадение
+    -- с UserId игрока = ложный флаг.
+    if PE_CREATOR_ID == 0 or PE_IS_GROUP then return false end
+    return p.UserId == PE_CREATOR_ID
+end
+
 -- ДЕТЕКТОР АДМИНОВ: вход известного админа/создателя — warn + алерт.
 local paConn = Players.PlayerAdded:Connect(function(plr)
     if STOPPED then return end
@@ -181,7 +202,8 @@ task.spawn(function()
     while not STOPPED do
         task.wait(1)
         if not STOPPED and CFG.AutoTeam and CFG.AutoTeam ~= "Off"
-           and not CFG.Apocalypse and LP.Parent then
+           and not CFG.Apocalypse and not CFG.AuraTeamBypass
+           and LP.Parent then
             local t = LP.Team
             if t and t.Name ~= CFG.AutoTeam then
                 local r = ReplicatedStorage
@@ -549,8 +571,14 @@ G.PE.GiveAll = function()
     -- переставало принимать клики (камера/фокус оставались в стене).
     CFG._giveNoFly = true
     for _, nm in ipairs(GIVE_ITEMS) do
-        if G.PE.Give(nm) then n = n + 1 end
+        -- pcall на каждый итем: UNLOAD посреди цикла зануляет G.PE.Give —
+        -- иначе throw рвал цикл ДО сброса _giveNoFly, и флай-ин гивера
+        -- молча отключался навсегда (флаг жил в getgenv).
+        pcall(function()
+            if G.PE.Give(nm) then n = n + 1 end
+        end)
         task.wait(0.25)
+        if STOPPED then break end
     end
     CFG._giveNoFly = nil
     print("[PE GIVE] items given: " .. n)
@@ -1559,7 +1587,8 @@ local function auraTick()
     -- Prisoner и Escaped каждые 1.5с — тогда аура достаёт и зеков, и
     -- охрану. Цена: сервер РЕСПАВНИТ нас на каждом флипе (пушка
     -- выпадает — сторож M9 вернёт её в течение 3с).
-    if CFG.AuraTeamBypass and now - (CFG._bypassAt or 0) >= 1.5 then
+    if CFG.AuraTeamBypass and not CFG.Apocalypse
+       and now - (CFG._bypassAt or 0) >= 1.5 then
         CFG._bypassAt = now
         CFG._bypassFlip = not CFG._bypassFlip
         local rB = ReplicatedStorage:FindFirstChild("ChooseTeamEvent")
