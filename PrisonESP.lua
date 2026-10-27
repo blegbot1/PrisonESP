@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.89  (Combat-only: PeUI + admin theatre full)
+--  PRISON ESP  v2.90  (Combat-only: PeUI + admin theatre full)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -132,6 +132,9 @@ CFG.AutoGiveName = pickOpt(CFG.AutoGiveName, {
 -- тебя. nil = «как у ауры» (следует слайдеру Damage per shot).
 CFG.Retr = CFG.Retr ~= false
 CFG.RetrDamage = tonumber(CFG.RetrDamage) or nil
+-- MIRROR: ретрибуция отражает ровно тот урон, которым ударили НАС
+-- (бьёт на 80 — получает 80), вместо фиксированного слайдера.
+CFG.RetrMirror = CFG.RetrMirror == true
 -- АНТИ-АФК: VirtualUser отвечает за нас на idle-проверку Roblox —
 -- долгие сессии без кика.
 CFG.AntiAFK = CFG.AntiAFK ~= false
@@ -1427,6 +1430,7 @@ local PE_LAST_HP = -1
 local PE_HIT_AT = 0
 local retTarget, retUntil = nil, 0
 local retPrinted = nil -- имя уже напечатанного атакующего (антиспам)
+local retHitDmg = 50   -- сколько урона пришло в последнем попадании
 
 -- КТО СТРЕЛЯЛ: сервер ретранслирует ВСЕ трассеры (VisualizeBullet)
 -- каждому клиенту. Слушаем их тихо (без отрисовки) и запоминаем,
@@ -1537,6 +1541,8 @@ local function auraTick()
             if PE_LAST_HP >= 0 and hp > 0 and hp < PE_LAST_HP - 0.5
                and now - PE_HIT_AT > 0.3 then
                 PE_HIT_AT = now
+                -- MIRROR: запоминаем, сколько урона пришло этим ударом.
+                retHitDmg = math.clamp(PE_LAST_HP - hp, 1, 200)
                 local atk = findAttacker(rootR)
                 if atk then
                     retTarget = atk
@@ -1565,9 +1571,11 @@ local function auraTick()
                 local bt = PE_BURN_AT[retTarget]
                 local burnR = (not bt or now - bt > 1.5)
                 if burnR then PE_BURN_AT[retTarget] = now end
-                -- Переключаемый урон: слайдер RetrDamage, 0 = как аура.
+                -- Переключаемый урон: MIRROR отражает полученный урон,
+                -- фиксированный режим — слайдер RetrDamage, 0 = как аура.
                 local dmgR = math.clamp(
-                    tonumber(CFG.RetrDamage)
+                    CFG.RetrMirror and retHitDmg
+                    or tonumber(CFG.RetrDamage)
                     or tonumber(CFG.KillAuraDamage) or 50, 1, 200)
                 pcall(function()
                     remoteR:FireServer(humA, headA, dmgR,
@@ -3593,6 +3601,14 @@ local okGUI, errGUI = pcall(function()
         Flag = "PE_Retr",
         CurrentValue = CFG.Retr ~= false,
         Callback = function(v) CFG.Retr = v end })
+    C:CreateToggle({ Name = "MIRROR mode (reflect the damage dealt to you)",
+        Flag = "PE_RetrMirror",
+        CurrentValue = CFG.RetrMirror == true,
+        Callback = function(v)
+            CFG.RetrMirror = v
+            print("[PE RET] mirror " .. (v and "ON - he hits 80, gets 80"
+                or "OFF - fixed slider damage"))
+        end })
     C:CreateSlider({ Name = "Damage back to attacker (0 = same as aura)",
         Flag = "PE_RetrDamage",
         Range = {0, 200}, Increment = 5,
@@ -4134,9 +4150,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.89 stopped")
+    print("[PE] v2.90 stopped")
 end
 
-print("[PE] v2.89 started (Combat-only, PeUI built-in)"
+print("[PE] v2.90 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
