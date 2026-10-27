@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.92  (Combat-only: PeUI + декал-фон)
+--  PRISON ESP  v2.93  (Combat-only: PeUI + фото с GitHub)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2393,8 +2393,67 @@ do
             local bgLog = function(step)
                 print("[PE UI] bg: " .. step)
             end
-            local bgSrc = "rbxassetid://93512518437052"
-            bgLog("using user decal 93512518437052")
+            local bgSrc = nil
+            -- v2.93: ФОТО С GITHUB через request/http_request (сырой
+            -- Body). game:HttpGet портит бинарные данные текстовым
+            -- декодированием - отсюда был пустой ассет (size 0,0).
+            -- Механика из ELITE HUB launcher, где это работало.
+            if type(request) == "function"
+               or type(http_request) == "function" then
+                pcall(function()
+                    local imgFile = "pe_bg_img.jpg"
+                    local imgURL = "https://raw.githubusercontent.com/"
+                        .. "blegbot1/PrisonESP/main/pe_bg.jpg"
+                    local have = false
+                    if type(isfile) == "function" then
+                        local okI, exists = pcall(function()
+                            return isfile(imgFile)
+                        end)
+                        have = okI and exists
+                    end
+                    if not have then
+                        local okD, data = pcall(function()
+                            if type(http_request) == "function" then
+                                return http_request({
+                                    Url = imgURL, Method = "GET" })
+                            end
+                            return request({
+                                Url = imgURL, Method = "GET" })
+                        end)
+                        if okD and data and data.Body
+                           and #data.Body > 500 then
+                            pcall(function()
+                                writefile(imgFile, data.Body)
+                            end)
+                            bgLog("downloaded jpg "
+                                .. #data.Body .. " bytes")
+                        else
+                            bgLog("jpg download failed: "
+                                .. tostring(data and data.StatusCode))
+                        end
+                    end
+                    local okI2, exists2 = pcall(function()
+                        return isfile(imgFile)
+                    end)
+                    if okI2 and exists2 then
+                        local okA, asset = pcall(function()
+                            return getcustomasset(imgFile)
+                        end)
+                        if okA and type(asset) == "string" then
+                            bgSrc = asset
+                            bgLog("PHOTO from GitHub OK")
+                        else
+                            bgLog("getcustomasset on jpg FAILED: "
+                                .. tostring(asset))
+                        end
+                    end
+                end)
+            end
+            -- Фолбэк: твой декал на Roblox (загружен, ID 93512518437052).
+            if not bgSrc then
+                bgSrc = "rbxassetid://93512518437052"
+                bgLog("falling back to user decal 93512518437052")
+            end
             local manual = getgenv().PE_BG_ID
             if type(manual) == "number" and manual > 0 then
                 bgSrc = "rbxassetid://" .. manual
@@ -4030,9 +4089,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.92 stopped")
+    print("[PE] v2.93 stopped")
 end
 
-print("[PE] v2.92 started (Combat-only, PeUI built-in)"
+print("[PE] v2.93 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
