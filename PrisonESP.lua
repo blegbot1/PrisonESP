@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.96  (Combat-only: PeUI + PNG фон, рендер по паттерну теста)
+--  PRISON ESP  v2.97  (Combat-only: PeUI + PNG фон, растянутый)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2478,10 +2478,12 @@ do
                 local panel = mk("Frame", {
                     Name = "BgPhotoPanel",
                     AnchorPoint = Vector2.new(1, 0),
-                    Position = UDim2.new(1, -10, 0, 8),
-                    Size = UDim2.new(0.4, 0, 1, -16),
-                    BackgroundColor3 = Color3.fromRGB(205, 196, 232),
-                    BackgroundTransparency = 0.35,
+                    Position = UDim2.new(1, 0, 0, 0),
+                    Size = UDim2.new(0.6, 0, 1, 0),
+                    -- Подложка = цвет окна: края невидимы, остаётся
+                    -- только сам персонаж (фит по панели).
+                    BackgroundColor3 = Color3.fromRGB(17, 11, 28),
+                    BackgroundTransparency = 0,
                     BorderSizePixel = 0,
                 }, root)
                 corner(10, panel)
@@ -4078,9 +4080,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.96 stopped")
+    print("[PE] v2.97 stopped")
 end
 
-print("[PE] v2.96 started (Combat-only, PeUI built-in)"
+print("[PE] v2.97 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
