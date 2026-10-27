@@ -1,5 +1,5 @@
 -- ============================================================
---  HERCULES GUI  v3.09  (Combat-only: PeUI + макс-частота хила)
+--  GERKYLES GUI  v3.10  (Combat-only: PeUI + макс-частота хила)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -3465,7 +3465,7 @@ end
 local guiOK = false
 local okGUI, errGUI = pcall(function()
     local W = PeUI:CreateWindow({
-        Name = "HERCULES",
+        Name = "GERKYLES GUI",
         -- Сохранение настроек: свой формат peui_config.json (те же
         -- флаги, свой JSON). Дефолты живут в getgenv().
         ConfigSaving = {
@@ -3980,7 +3980,7 @@ local okGUI, errGUI = pcall(function()
                 end
             end })
         ST:CreateParagraph({ Title = "Version",
-            Content = "HERCULES GUI v3.09 (Combat-only, built-in PeUI). Background: double-layer (purple base + photo panel right). Photo source: pe_bg.png in workspace (auto-download from GitHub) OR decal id above. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "GERKYLES GUI v3.10 (Combat-only, built-in PeUI). Background: double-layer (purple base + photo panel right). Photo source: pe_bg.png in workspace (auto-download from GitHub) OR decal id above. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
@@ -4228,9 +4228,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[HERCULES] v3.09 stopped")
+    print("[GERKYLES GUI] v3.10 stopped")
 end
 
-print("[HERCULES] v3.09 started (Combat-only, PeUI built-in)"
+print("[GERKYLES GUI] v3.10 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
