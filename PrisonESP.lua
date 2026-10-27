@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.97  (Combat-only: PeUI + PNG фон, растянутый)
+--  PRISON ESP  v2.98  (Combat-only: PeUI + PNG фон, человечек растянут)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2493,7 +2493,8 @@ do
                     BackgroundTransparency = 1,
                     Image = "",
                     ImageTransparency = 0,
-                    ScaleType = Enum.ScaleType.Fit,
+                    -- Растягиваем САМОГО человечка на всю панель.
+                    ScaleType = Enum.ScaleType.Stretch,
                     BorderSizePixel = 0,
                 }, panel)
                 PeUI._bgPanel = panel
@@ -4080,9 +4081,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.97 stopped")
+    print("[PE] v2.98 stopped")
 end
 
-print("[PE] v2.97 started (Combat-only, PeUI built-in)"
+print("[PE] v2.98 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
