@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.90  (Combat-only: PeUI + admin theatre full)
+--  PRISON ESP  v2.91  (Combat-only: PeUI + двойной фон)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2551,17 +2551,21 @@ do
                 end
             end
             if bgSrc then
-                -- Светлая подложка ПОД фото: картинка — тёмный силуэт
-                -- на ПРОЗРАЧНОМ фоне, на тёмном окне она невидима.
-                -- Мягкая светлая панель делает силуэт читаемым.
-                mk("Frame", {
-                    Name = "BgLight",
-                    Size = UDim2.new(1, 0, 1, 0),
+                -- ДВОЙНОЙ ФОН: фиолетовая база остаётся, фото ложится
+                -- ВТОРЫМ СЛОЕМ — портретная панель справа на светлой
+                -- подложке (фото — тёмный силуэт на прозрачном фоне,
+                -- без светлой подложки он невидим на тёмном окне).
+                local panel = mk("Frame", {
+                    Name = "BgPhotoPanel",
+                    AnchorPoint = Vector2.new(1, 0),
+                    Position = UDim2.new(1, -10, 0, 8),
+                    Size = UDim2.new(0.4, 0, 1, -16),
                     BackgroundColor3 = Color3.fromRGB(205, 196, 232),
-                    BackgroundTransparency = 0.6,
+                    BackgroundTransparency = 0.35,
                     BorderSizePixel = 0,
                     ZIndex = 0,
                 }, root)
+                corner(10, panel)
                 local bgImage = mk("ImageLabel", {
                     Name = "BgPhoto",
                     Size = UDim2.new(1, 0, 1, 0),
@@ -2571,18 +2575,12 @@ do
                     ScaleType = Enum.ScaleType.Fit,
                     BorderSizePixel = 0,
                     ZIndex = 0,
-                }, root)
-                mk("Frame", {
-                    Name = "BgDim",
-                    Size = UDim2.new(1, 0, 1, 0),
-                    BackgroundColor3 = Color3.fromRGB(10, 6, 18),
-                    BackgroundTransparency = 0.45,
-                    BorderSizePixel = 0,
-                    ZIndex = 0,
-                }, root)
-                -- Диагностика + самоудаление пустышки: Real вернул
-                -- ассет с ImageRectSize (0,0) — «loaded, но пустой».
-                -- Тогда убираем невидимку и подсказываем декал-путь.
+                }, panel)
+                PeUI._bgPanel = panel
+                PeUI._bgImage = bgImage
+                -- Диагностика + самопочинка: Real отдал ассет с
+                -- ImageRectSize (0,0) — «loaded, но пустой». Пробуем
+                -- живой декал PE_BG_ID; нет декала — панель убираем.
                 task.delay(2.5, function()
                     pcall(function()
                         local rs = bgImage.ImageRectSize
@@ -2590,16 +2588,28 @@ do
                             .. tostring(bgImage.IsLoaded)
                             .. " (size " .. tostring(rs) .. ")")
                         if rs.X < 2 or rs.Y < 2 then
-                            bgImage:Destroy()
-                            local dim = root:FindFirstChild("BgDim")
-                            if dim then dim:Destroy() end
-                            local lite = root:FindFirstChild("BgLight")
-                            if lite then lite:Destroy() end
-                            print("[PE UI] bg: executor returned an EMPTY "
-                                .. "asset - removed. Guaranteed path: "
-                                .. "upload the photo as a DECAL on "
-                                .. "roblox.com and set "
-                                .. "getgenv().PE_BG_ID = <decal id>")
+                            local manual = getgenv().PE_BG_ID
+                            if type(manual) == "number" and manual > 0 then
+                                bgImage.Image = "rbxassetid://" .. manual
+                                print("[PE UI] bg: empty asset - switched "
+                                    .. "to PE_BG_ID decal")
+                            elseif type(manual) == "string"
+                               and manual ~= "" then
+                                bgImage.Image = manual
+                                print("[PE UI] bg: empty asset - switched "
+                                    .. "to PE_BG_ID")
+                            else
+                                if PeUI._bgPanel then
+                                    pcall(function() PeUI._bgPanel:Destroy() end)
+                                end
+                                PeUI._bgPanel = nil
+                                PeUI._bgImage = nil
+                                print("[PE UI] bg: executor returned an "
+                                    .. "EMPTY asset - panel removed. "
+                                    .. "Guaranteed path: upload the photo "
+                                    .. "as a DECAL on roblox.com and paste "
+                                    .. "its id in Settings -> Photo decal ID")
+                            end
                         end
                     end)
                 end)
@@ -3904,8 +3914,26 @@ local okGUI, errGUI = pcall(function()
                 if stop then stop() end
             end })
         ST:CreateSection("Info")
+        ST:CreateInput({ Name = "Photo decal ID (background)",
+            PlaceholderText = "decal id from roblox.com, e.g. 123456789",
+            CurrentValue = tostring(getgenv().PE_BG_ID or ""),
+            Flag = "PE_BgIdInput",
+            Callback = function(text)
+                local id = tonumber(text)
+                if id and id > 0 then
+                    getgenv().PE_BG_ID = id
+                    if PeUI and PeUI._bgImage then
+                        pcall(function()
+                            PeUI._bgImage.Image = "rbxassetid://" .. id
+                        end)
+                        print("[PE UI] bg: decal id set LIVE -> " .. id)
+                    else
+                        print("[PE UI] bg: id saved - RESTART to apply")
+                    end
+                end
+            end })
         ST:CreateParagraph({ Title = "Version",
-            Content = "PRISON ESP v2.78 (Combat-only, built-in PeUI). Background photo: put pe_bg.png into the executor workspace (auto via getcustomasset), or set getgenv().PE_BG_ID = decal id. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "PRISON ESP v2.91 (Combat-only, built-in PeUI). Background: double-layer (purple base + photo panel right). Photo source: pe_bg.png in workspace (auto-download from GitHub) OR decal id above. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
@@ -4150,9 +4178,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.90 stopped")
+    print("[PE] v2.91 stopped")
 end
 
-print("[PE] v2.90 started (Combat-only, PeUI built-in)"
+print("[PE] v2.91 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
