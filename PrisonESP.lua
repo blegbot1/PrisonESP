@@ -1,5 +1,5 @@
 -- ============================================================
---  PRISON ESP  v2.95  (Combat-only: PeUI + PNG фон)
+--  PRISON ESP  v2.96  (Combat-only: PeUI + PNG фон, рендер по паттерну теста)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2470,6 +2470,11 @@ do
                 -- ВТОРЫМ СЛОЕМ — портретная панель справа на светлой
                 -- подложке (фото — тёмный силуэт на прозрачном фоне,
                 -- без светлой подложки он невидим на тёмном окне).
+                -- v2.96: ТОЧНАЯ копия рабочего паттерна из pe_bgtest:
+                -- Image пустой при создании, ассет присваивается ПОСЛЕ
+                -- парентинга; ZIndex обычные (0 ломал отрисовку);
+                -- EditableImage-попытка УДАЛЕНА — она перезаписывала
+                -- рабочий Image пустым Content'ом.
                 local panel = mk("Frame", {
                     Name = "BgPhotoPanel",
                     AnchorPoint = Vector2.new(1, 0),
@@ -2478,72 +2483,34 @@ do
                     BackgroundColor3 = Color3.fromRGB(205, 196, 232),
                     BackgroundTransparency = 0.35,
                     BorderSizePixel = 0,
-                    ZIndex = 0,
                 }, root)
                 corner(10, panel)
                 local bgImage = mk("ImageLabel", {
                     Name = "BgPhoto",
                     Size = UDim2.new(1, 0, 1, 0),
                     BackgroundTransparency = 1,
-                    Image = bgSrc,
+                    Image = "",
                     ImageTransparency = 0,
                     ScaleType = Enum.ScaleType.Fit,
                     BorderSizePixel = 0,
-                    ZIndex = 0,
                 }, panel)
                 PeUI._bgPanel = panel
                 PeUI._bgImage = bgImage
-                -- Диагностика + терпение: новый декал может пройти
-                -- модерацию с задержкой — проверяем 3 раза (2.5/7.5/15с).
-                -- Перед сдачей — попытка №3: EditableImage (новый Roblox
-                -- API, качает URL в память БЕЗ getcustomasset).
-                task.delay(2.5, function()
+                -- Ассет присваиваем ПОСЛЕ парентинга (как в тесте, где
+                -- фото рендерилось), с задержкой на строкновение GUI.
+                task.delay(0.2, function()
+                    pcall(function() bgImage.Image = bgSrc end)
+                    print("[PE UI] bg: image assigned, len "
+                        .. #tostring(bgSrc))
+                end)
+                -- Инфо-лог раз в 3с (rect 0,0 у Real — НОРМА для
+                -- getcustomasset: в тесте фото рендерилось и с 0,0).
+                task.delay(4, function()
                     pcall(function()
-                        local triedEditable = false
-                        for _, extra in ipairs({ 0, 5, 7.5 }) do
-                            if extra > 0 then task.wait(extra) end
-                            local rs = bgImage.ImageRectSize
-                            print("[PE UI] bg: image loaded = "
-                                .. tostring(bgImage.IsLoaded)
-                                .. " (size " .. tostring(rs) .. ")")
-                            if rs.X >= 2 and rs.Y >= 2 then
-                                print("[PE UI] bg: PHOTO IS VISIBLE")
-                                return
-                            end
-                            if not triedEditable then
-                                triedEditable = true
-                                pcall(function()
-                                    local AS = game
-                                        :GetService("AssetService")
-                                    local ei = AS:CreateEditableImageAsync(
-                                        Content.fromUri(
-                                            "https://raw.githubusercontent.com/"
-                                            .. "blegbot1/PrisonESP/main/pe_bg.png"))
-                                    bgImage.Content =
-                                        Content.fromObject(ei)
-                                    bgLog("EditableImage applied")
-                                end)
-                                if bgImage.Content ~= nil
-                                   and bgImage.Content ~= "" then
-                                    return
-                                end
-                            end
-                        end
-                        local manual = getgenv().PE_BG_ID
-                        if type(manual) == "number" and manual > 0 then
-                            bgImage.Image = "rbxassetid://" .. manual
-                            print("[PE UI] bg: empty asset - switched to "
-                                .. "PE_BG_ID decal")
-                        elseif type(manual) == "string"
-                           and manual ~= "" then
-                            bgImage.Image = manual
-                            print("[PE UI] bg: empty asset - switched to "
-                                .. "PE_BG_ID")
-                        else
-                            print("[PE UI] bg: decal still empty after "
-                                .. "15s - moderating, or paste another "
-                                .. "decal id in Settings -> Photo decal ID")
-                        end
+                        print("[PE UI] bg: image loaded = "
+                            .. tostring(bgImage.IsLoaded)
+                            .. " (rect " .. tostring(bgImage.ImageRectSize)
+                            .. ", 0,0 on Real is normal)")
                     end)
                 end)
             else
@@ -4111,9 +4078,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[PE] v2.95 stopped")
+    print("[PE] v2.96 stopped")
 end
 
-print("[PE] v2.95 started (Combat-only, PeUI built-in)"
+print("[PE] v2.96 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
