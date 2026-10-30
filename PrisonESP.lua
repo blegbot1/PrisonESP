@@ -1,5 +1,5 @@
 -- ============================================================
---  GERKYLES GUI  v3.10  (Combat-only: PeUI + макс-частота хила)
+--  GERKYLES GUI  v3.11  (Combat-only: PeUI + флинг при огне)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1643,9 +1643,13 @@ local function auraTick()
                             local btF = PE_BURN_AT[pF]
                             local burnFA = (not btF or now - btF > 2)
                             if burnFA then PE_BURN_AT[pF] = now end
+                            -- При огне флинг, если включён C00lFling:
+                            -- загорелся рядом с нами - улетел вверх.
                             pcall(function()
                                 remoteFA:FireServer(hF2, headF2, 1,
-                                    Vector3.new(0, 1, 0), 0, 0, burnFA)
+                                    Vector3.new(0, 1, 0),
+                                    CFG.C00lFling and 20000 or 0, 0,
+                                    burnFA)
                             end)
                         end
                     end
@@ -1677,14 +1681,21 @@ local function auraTick()
                         if burnC then PE_BURN_AT[p] = now end
                         hitC = hitC + 1
                         local dir = Vector3.new(0, 1, 0)
-                        if myRootC then
+                        local aimC = root
+                        if CFG.C00lFling then
+                            -- Флинг: чисто ВВЕРХ и в голову — тот же
+                            -- рецепт, что у рабочей аура-флинговки
+                            -- (в root сервер флингует слабо).
+                            local headC = ch:FindFirstChild("Head")
+                            if headC then aimC = headC end
+                        elseif myRootC then
                             local delta = root.Position - myRootC.Position
                             if delta.Magnitude > 0.01 then
                                 dir = delta.Unit
                             end
                         end
                         pcall(function()
-                            remoteC:FireServer(hum, root,
+                            remoteC:FireServer(hum, aimC,
                                 math.clamp(tonumber(CFG.C00lDamage) or 3,
                                     1, 20),
                                 dir,
@@ -4228,9 +4239,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[GERKYLES GUI] v3.10 stopped")
+    print("[GERKYLES GUI] v3.11 stopped")
 end
 
-print("[GERKYLES GUI] v3.10 started (Combat-only, PeUI built-in)"
+print("[GERKYLES GUI] v3.11 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
