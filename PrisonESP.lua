@@ -1,5 +1,5 @@
 -- ============================================================
---  GERKYLES GUI  v3.13  (Combat-only: PeUI + аудит-фиксы)
+--  GERKYLES GUI  v3.14  (Combat-only: PeUI + Stats HUD + rejoin)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -116,6 +116,8 @@ CFG.C00lTeam = (type(CFG.C00lTeam) == "string"
 -- (1 урона + серверный огонь). Карту сервер не поджигает — только
 -- игроки (проверка принадлежности, доказано вживую).
 CFG.FireAura = CFG.FireAura == true
+-- STATS HUD: панель киллы/смерти/пинг/FPS (v3.15), вкл по умолчанию.
+CFG.StatsHUD = CFG.StatsHUD ~= false
 -- ANTI-FLING: резкий взлёт (флинг/наручники/подброс) = заморозка на
 -- месте на 1.2с. Ходьба, прыжки и свои телепорты не триггерят.
 CFG.AntiFling = CFG.AntiFling ~= false
@@ -172,6 +174,13 @@ local UIS = game:GetService("UserInputService")
 -- не копятся, при выходе чистим руками для мгновенности.
 local PE_BURN_AT = setmetatable({}, { __mode = "k" })
 local PE_FLING_AT = setmetatable({}, { __mode = "k" })
+-- STATS (v3.15): кому мы наносили урон за последние 5с — их смерть
+-- засчитывается в киллы HUD'а.
+local hitBy = setmetatable({}, { __mode = "k" })
+local stats = { kills = 0, deaths = 0 }
+local function markHit(p)
+    if p and p ~= LP then hitBy[p] = os.clock() end
+end
 
 -- UserId админов, вшитые в LocalScript админ-панели игры (u45) +
 -- создатель игры (CreatorId). v2.72-2.78: блок случайно выпал при
@@ -1597,6 +1606,7 @@ local function auraTick()
                     remoteR:FireServer(humA, headA, dmgR,
                         Vector3.new(0, 1, 0), 0, 0, burnR)
                 end)
+                markHit(retTarget)
             end
             if not humA or humA.Health <= 0 then
                 retTarget = nil
@@ -1689,6 +1699,7 @@ local function auraTick()
                         local burnC = (not bt or now - bt > 2)
                         if burnC then PE_BURN_AT[p] = now end
                         hitC = hitC + 1
+                markHit(p)
                         local dir = Vector3.new(0, 1, 0)
                         local aimC = root
                         if CFG.C00lFling then
@@ -2088,6 +2099,7 @@ local function auraTick()
                     or ((mode == "Everyone" or mode == "") and inRange)
                 if ok then
                     hits = hits + 1
+                markHit(p)
                     -- Урон зажат на месте использования: сохранённые
                     -- консолью/прошлой сессией значения не спамят сервер.
                     local dmg = math.clamp(
@@ -4056,6 +4068,19 @@ local okGUI, errGUI = pcall(function()
                 PeUI.ApplyLanguage()
                 print("[PE] language = " .. PE_LANG .. " (applied live)")
             end })
+        ST:CreateSection("Session")
+        ST:CreateToggle({ Name = "Stats HUD (kills/ping/fps)",
+            Flag = "PE_StatsHUD",
+            CurrentValue = CFG.StatsHUD ~= false,
+            Callback = function(v) CFG.StatsHUD = v end })
+        ST:CreateButton({ Name = "REJOIN (new server)",
+            Callback = function()
+                print("[PE] rejoining (new server)...")
+                pcall(function()
+                    game:GetService("TeleportService")
+                        :Teleport(game.PlaceId, LP)
+                end)
+            end })
         ST:CreateSection("Info")
         ST:CreateInput({ Name = "Photo decal ID (background)",
             PlaceholderText = "decal id from roblox.com, e.g. 123456789",
@@ -4204,6 +4229,109 @@ if not guiOK then
 end
 
 -- ============================================================
+--  STATS HUD (v3.15): киллы/смерти/сессия/пинг/онлайн/FPS.
+--  Киллы: цель умерла в течение 5с после нашего попадания.
+-- ============================================================
+local hudConns = {}
+local hudGui, hudText
+local frames = 0
+local lastFpsAt = os.clock()
+hudConns[#hudConns + 1] = RunService.RenderStepped:Connect(function()
+    frames = frames + 1
+end)
+local function hookStatsDeaths(ch)
+    local h = ch:WaitForChild("Humanoid", 10)
+    if h then
+        h.Died:Connect(function()
+            if not STOPPED then stats.deaths = stats.deaths + 1 end
+        end)
+    end
+end
+if LP.Character then pcall(function() hookStatsDeaths(LP.Character) end) end
+hudConns[#hudConns + 1] = LP.CharacterAdded:Connect(function(ch)
+    if not STOPPED then pcall(function() hookStatsDeaths(ch) end) end
+end)
+task.spawn(function()
+    while not STOPPED do
+        task.wait(0.5)
+        if STOPPED then break end
+        -- Киллы: цель, в которую мы попали за последние 5с, умерла.
+        for p, t in pairs(hitBy) do
+            local gone = not p.Parent
+            local dead = false
+            if p.Parent then
+                local h = p.Character
+                    and p.Character:FindFirstChildOfClass("Humanoid")
+                dead = h ~= nil and h.Health <= 0
+            end
+            if gone or dead then
+                if os.clock() - t < 5 then
+                    stats.kills = stats.kills + 1
+                end
+                hitBy[p] = nil
+            end
+        end
+        if CFG.StatsHUD ~= false then
+            if not hudGui or not hudGui.Parent then
+                hudGui = Instance.new("ScreenGui")
+                hudGui.Name = "PE_STATS"
+                hudGui.ResetOnSpawn = false
+                hudGui.IgnoreGuiInset = true
+                hudGui.DisplayOrder = 99999
+                pcall(function()
+                    hudGui.Parent = LP:FindFirstChildOfClass("PlayerGui")
+                end)
+                if not hudGui.Parent then
+                    pcall(function() hudGui.Parent = CoreGui end)
+                end
+                local pnl = Instance.new("Frame")
+                pnl.Size = UDim2.new(0, 200, 0, 100)
+                pnl.Position = UDim2.new(0, 10, 0, 10)
+                pnl.BackgroundColor3 = Color3.fromRGB(17, 11, 28)
+                pnl.BackgroundTransparency = 0.25
+                pnl.BorderSizePixel = 0
+                pnl.Parent = hudGui
+                local cr = Instance.new("UICorner")
+                cr.CornerRadius = UDim.new(0, 10)
+                cr.Parent = pnl
+                local stl = Instance.new("UIStroke")
+                stl.Color = Color3.fromRGB(90, 60, 150)
+                stl.Parent = pnl
+                hudText = Instance.new("TextLabel")
+                hudText.Size = UDim2.new(1, -16, 1, -12)
+                hudText.Position = UDim2.new(0, 8, 0, 6)
+                hudText.BackgroundTransparency = 1
+                hudText.Font = Enum.Font.Code
+                hudText.TextSize = 13
+                hudText.TextColor3 = Color3.fromRGB(200, 190, 255)
+                hudText.TextXAlignment = Enum.TextXAlignment.Left
+                hudText.TextYAlignment = Enum.TextYAlignment.Top
+                hudText.Parent = pnl
+            end
+            local sess = os.clock() - (G.PE_LOADED_AT or os.clock())
+            local mm = math.floor(sess / 60)
+            local ss = math.floor(sess % 60)
+            local nowF = os.clock()
+            local fps = math.floor(frames
+                / math.max(nowF - lastFpsAt, 0.01))
+            frames = 0
+            lastFpsAt = nowF
+            local ping = 0
+            pcall(function()
+                ping = math.floor(LP:GetNetworkPing() * 1000)
+            end)
+            local online = #Players:GetPlayers()
+            if hudText then
+                hudText.Text = string.format(
+                    "K: %d   D: %d\nSession: %02d:%02d\nPing: %d ms"
+                        .. "  |  Online: %d\nFPS: %d",
+                    stats.kills, stats.deaths, mm, ss, ping, online, fps)
+            end
+        end
+    end
+end)
+
+-- ============================================================
 --  ВЫБОР ЦЕЛИ: выпадающие списки игроков (обновляются сами).
 -- ============================================================
 local function playerOpts()
@@ -4300,6 +4428,15 @@ G.PE_Stop = function()
         pcall(function() c:Disconnect() end)
     end
     vbConns = {}
+    -- STATS HUD: коннекты и панель (v3.15).
+    for _, c in ipairs(hudConns) do
+        pcall(function() c:Disconnect() end)
+    end
+    hudConns = {}
+    if hudGui then
+        pcall(function() hudGui:Destroy() end)
+        hudGui = nil
+    end
     -- FPS-буст удалён (v2.75): функция не существует.
     -- v3.13: сессионные метки в getgenv чистим — иначе _manualTeamAt
     -- блокировал AutoTeam первые секунды новой сессии, а _giveNoFly
@@ -4327,9 +4464,16 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[GERKYLES GUI] v3.13 stopped")
+    print("[GERKYLES GUI] v3.14 stopped")
 end
 
-print("[GERKYLES GUI] v3.13 started (Combat-only, PeUI built-in)"
-    .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
+print("[GERKYLES GUI] v3.14 started (Combat-only, PeUI built-in)")
+-- Автозагрузка скрипта после телепортов/смены сервера (v3.14):
+-- фланг не теряется при хопе. Кик не ловится (среда умирает).
+if type(queue_on_teleport) == "function" then
+    pcall(function()
+        queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/blegbot1/PrisonESP/main/PrisonESP.lua"))()')
+    end)
+end
+print("[PE] console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
