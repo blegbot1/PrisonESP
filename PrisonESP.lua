@@ -3343,7 +3343,10 @@ do
                     end)
                     local sig = ""
                     for _, p in ipairs(pls) do
-                        sig = sig .. p.Name .. ";"
+                        -- Команда в сигнатуре: смена команды игрока
+                        -- обновляет подпись Team в его строке.
+                        sig = sig .. p.Name .. ":"
+                            .. tostring(p.Team and p.Team.Name) .. ";"
                     end
                     if not force and sig == lastSig then return end
                     lastSig = sig
@@ -3532,11 +3535,7 @@ do
     end
 end
 
--- Дропдауны выбора цели регистрируются здесь при сборке меню,
--- поэтому переменная объявлена ДО GUI-блока (v2.5 падала: #nil).
-local targetPickers = {}
 -- Списки выбора целей: игроки + «Everyone», обновляются раз в 5с.
-local teamPickers = {}
 local function teamOpts()
     local o = {}
     for _, p in ipairs(Players:GetPlayers()) do
@@ -3646,10 +3645,8 @@ local okGUI, errGUI = pcall(function()
         ["Auto-give after death"] = "Авто-выдача после смерти",
         ["Auto-give weapon"] = "Оружие для авто-выдачи",
         ["GIVE ALL (guns + KeyCard)"] = "ВЫДАТЬ ВСЁ (пушки + пропуск)",
-        ["Give: "] = "Выдать: ",
         ["Open ALL doors (jail cells)"] = "Открыть ВСЕ двери (камеры)",
         ["Gun source -> console (decompile)"] = "Исходник пушки -> консоль (декомпил)",
-        ["Kill aura"] = "Килл-аура",
         ["Upgrade"] = "Прокачка", ["Giver"] = "Гивер",
         ["Zones"] = "Зоны", ["Items"] = "Предметы",
         ["Info"] = "Инфо", ["Version"] = "Версия",
@@ -3679,7 +3676,15 @@ local okGUI, errGUI = pcall(function()
         Content = "Hits exactly like the gun itself: InflictTarget(Humanoid, RootPart, damage, direction, knockback, lifesteal, flame) - signature from the decompiled GunScript_Local. Needs a gun in hands/backpack." })
     C:CreateToggle({ Name = "Kill aura", Flag = "PE_KillAura",
         CurrentValue = CFG.KillAura == true,
-        Callback = function(v) CFG.KillAura = v end })
+        Callback = function(v)
+            CFG.KillAura = v
+            -- Обратное исключение: аура при живом APOC = 280+ FireServer/с.
+            if v and CFG.Apocalypse then
+                local elP = PeUI.Flags.PE_Apocalypse
+                if elP and elP.Apply then elP.Apply(false) else CFG.Apocalypse = false end
+                print("[PE] apocalypse auto-disabled (mutual excl.)")
+            end
+        end })
     C:CreateSlider({ Name = "Aura radius", Flag = "PE_KillAuraRadius",
         Range = {10, 120}, Increment = 5,
         CurrentValue = tonumber(CFG.KillAuraRadius) or 40,
@@ -3899,9 +3904,11 @@ local okGUI, errGUI = pcall(function()
         Callback = function(v)
             CFG.Apocalypse = v
             -- Взаимоисключение с килл-аурой: вместе они давят 280+
-            -- FireServer/с — сеть начинает терять пакеты.
+            -- FireServer/с — сеть начинает терять пакеты. Чужой тумблер
+            -- гасим ЧЕРЕЗ Apply — иначе пилюля остаётся в положении ON.
             if v and CFG.KillAura then
-                CFG.KillAura = false
+                local elA = PeUI.Flags.PE_KillAura
+                if elA and elA.Apply then elA.Apply(false) else CFG.KillAura = false end
                 print("[PE APOC] kill aura auto-disabled (mutual excl.)")
             end
         end })
@@ -4209,12 +4216,6 @@ local function refreshTargetPickers()
     -- Динамические списки PeUI (вкладка Friends): перестройка при
     -- изменении состава игроков (внутри — проверка на изменения).
     if PeUI and PeUI._listRefresh then pcall(PeUI._listRefresh) end
-    local opts = playerOpts()
-    for _, d in ipairs(targetPickers) do
-        -- Внимание: в Rayfield обновление списка — :Refresh (а :Set
-        -- выбирает опцию). Раньше звали :Set — список не обновлялся.
-        pcall(function() d:Refresh(opts) end)
-    end
     local topts = teamOpts()
     -- v2.53: выбранный ник ушёл с сервера (или сохранён с прошлой
     -- сессии) — isSel=false у всех, аура молча не била НИКОГО.
@@ -4296,6 +4297,15 @@ G.PE_Stop = function()
     end
     vbConns = {}
     -- FPS-буст удалён (v2.75): функция не существует.
+    -- v3.13: сессионные метки в getgenv чистим — иначе _manualTeamAt
+    -- блокировал AutoTeam первые секунды новой сессии, а _giveNoFly
+    -- навсегда глушил флай-ин гивера.
+    CFG._manualTeamAt = nil
+    CFG._giveNoFly = nil
+    CFG._apocNoGunSince = nil
+    CFG._apocHasGun = nil
+    CFG._apocWant = nil
+    CFG._giveFlyAt = nil
     CFG._ensureBusy = nil
     pcall(function()
         if CFG._apocPerchCF then
