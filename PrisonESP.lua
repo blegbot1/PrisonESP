@@ -1,5 +1,5 @@
 -- ============================================================
---  GERKYLES GUI  v3.14  (Combat-only: PeUI + Stats HUD + rejoin)
+--  GERKYLES GUI  v3.15  (Combat-only: PeUI + друзья в ауре)s HUD + rejoin)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -1831,7 +1831,8 @@ local function auraTick()
             local hum = ch and ch:FindFirstChildOfClass("Humanoid")
             local root = ch and ch:FindFirstChild("HumanoidRootPart")
             if ch and hum and hum.Health > 0 and root
-               and not ch:FindFirstChildOfClass("ForceField") then
+               and not ch:FindFirstChildOfClass("ForceField")
+               and not CFG.Friends[p.UserId] then
                 -- «Выбранный игрок»: бьём только цель из списка,
                 -- без ограничения дистанции.
                 -- Выбран конкретный игрок — бьём его без лимита
@@ -4197,10 +4198,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[GERKYLES GUI] v3.14 stopped")
+    print("[GERKYLES GUI] v3.15 stopped")
 end
 
-print("[GERKYLES GUI] v3.14 started (Combat-only, PeUI built-in)")
+print("[GERKYLES GUI] v3.15 started (Combat-only, PeUI built-in)")
 -- Автозагрузка скрипта после телепортов/смены сервера (v3.14):
 -- фланг не теряется при хопе. Кик не ловится (среда умирает).
 if type(queue_on_teleport) == "function" then
