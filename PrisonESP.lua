@@ -1,5 +1,5 @@
 -- ============================================================
---  GERKYLES GUI  v3.16  (Combat-only: перетаскиваемый Stats HUD)ья в ауре)s HUD + rejoin)
+--  GERKYLES GUI  v3.17  (Combat-only: PeUI + живой перевод всех вкладок)ья в ауре)s HUD + rejoin)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2050,7 +2050,10 @@ do
     -- Реестр переводимых текстов: [объект] = оригинальная строка.
     -- Язык переключается ЖИВО (PeUI.ApplyLanguage) - без перезагрузки
     -- скрипта. Слабые ключи: уничтоженные элементы не копятся.
-    PeUI._texts = setmetatable({}, { __mode = "k" })
+    -- СИЛЬНЫЕ ключи: слабые вычищал GC (на лейблы больше никто в Lua
+    -- не ссылался) — и живой перевод переставал работать на всех
+    -- вкладках, кроме случайных. Мёртвые записи чистит ApplyLanguage.
+    PeUI._texts = {}
     PeUI.Lang = "en"
     local function setText(obj, orig)
         obj.Text = tr(orig)
@@ -2058,13 +2061,18 @@ do
         return obj
     end
     function PeUI.ApplyLanguage()
+        -- Чистка: уничтоженные элементы (пересобранные списки/попапы)
+        -- выкидываем из реестра, чтобы таблица не росла вечно.
         for obj, orig in pairs(PeUI._texts) do
-            if obj and obj.Parent then
-                if obj:IsA("TextBox") then
-                    obj.PlaceholderText = tr(orig)
-                else
-                    obj.Text = tr(orig)
-                end
+            if not obj.Parent then
+                PeUI._texts[obj] = nil
+            end
+        end
+        for obj, orig in pairs(PeUI._texts) do
+            if obj:IsA("TextBox") then
+                obj.PlaceholderText = tr(orig)
+            else
+                obj.Text = tr(orig)
             end
         end
     end
@@ -4255,10 +4263,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[GERKYLES GUI] v3.16 stopped")
+    print("[GERKYLES GUI] v3.17 stopped")
 end
 
-print("[GERKYLES GUI] v3.16 started (Combat-only, PeUI built-in)")
+print("[GERKYLES GUI] v3.17 started (Combat-only, PeUI built-in)")
 -- Автозагрузка скрипта после телепортов/смены сервера (v3.14):
 -- фланг не теряется при хопе. Кик не ловится (среда умирает).
 if type(queue_on_teleport) == "function" then
