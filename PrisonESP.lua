@@ -1,5 +1,5 @@
 -- ============================================================
---  GERKYLES GUI  v3.11  (Combat-only: PeUI + флинг при огне)
+--  GERKYLES GUI  v3.12  (Combat-only: PeUI + APOC флай-ин гивер)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -116,6 +116,9 @@ CFG.C00lTeam = (type(CFG.C00lTeam) == "string"
 -- (1 урона + серверный огонь). Карту сервер не поджигает — только
 -- игроки (проверка принадлежности, доказано вживую).
 CFG.FireAura = CFG.FireAura == true
+-- ANTI-FLING: резкий взлёт (флинг/наручники/подброс) = заморозка на
+-- месте на 1.2с. Ходьба, прыжки и свои телепорты не триггерят.
+CFG.AntiFling = CFG.AntiFling ~= false
 -- АПОКАЛИПСИС = УБИВАЛКА: один тумблер делает всё сам —
 -- 1) команда СБЕЖАВШИЙ, 2) сам берёт M9, 3) телепорт высоко в небо
 -- (не достанут; дистанции урона нет — доказано), 4) все игроки
@@ -218,6 +221,7 @@ task.spawn(function()
         task.wait(1)
         if not STOPPED and CFG.AutoTeam and CFG.AutoTeam ~= "Off"
            and not CFG.Apocalypse and not CFG.AuraTeamBypass
+           and os.clock() - (CFG._manualTeamAt or 0) > 5
            and LP.Parent then
             local t = LP.Team
             if t and t.Name ~= CFG.AutoTeam then
@@ -503,12 +507,15 @@ G.PE.Hit = function(namePart, partName)
 end
 
 -- PE.Team("Guard") — проба смены команды.
+-- v3.12: ручной клик ставит 5-секундную отсрочку AutoTeam — иначе
+-- ватчдог возвращал нас через 1с и получалась война команд.
 G.PE.Team = function(teamName)
     local r = ReplicatedStorage:FindFirstChild("ChooseTeamEvent")
     if not r or not r:IsA("RemoteEvent") then
         print("[PE TEAM] ChooseTeamEvent not found")
         return
     end
+    CFG._manualTeamAt = os.clock()
     print("[PE TEAM] ChooseTeamEvent('" .. tostring(teamName) .. "'). WATCH YOUR TEAM!")
     pcall(function() r:FireServer(teamName) end)
 end
@@ -542,7 +549,8 @@ G.PE.Give = function(itemName)
                 local origCF = root and root.CFrame
                 local teleported = false
                 if root and part and origCF and not CFG._giveNoFly
-                   and not CFG.Apocalypse and not root.Anchored
+                   and (not CFG.Apocalypse or CFG._apocFlyOnce)
+                   and not root.Anchored
                    and (part.Position - root.Position).Magnitude > 60 then
                     root.CFrame = part.CFrame + Vector3.new(0, 4, 0)
                     teleported = true
@@ -1429,6 +1437,7 @@ local immortalAt = 0
 local immortalTapAt = 0
 local c00lAt = 0
 local fireAuraAt = 0
+local antiFlingHold = 0
 local retAt = 0
 local PE_LAST_HP = -1
 local PE_HIT_AT = 0
@@ -1704,7 +1713,7 @@ local function auraTick()
                     end
                 end
             end
-        elseif os.clock() - (CFG._noGunWarnAt or 0) > 10 then
+        elseif os.clock() - (CFG._noGunWarnAt or 0) > 30 then
             CFG._noGunWarnAt = os.clock()
             warn("[PE] c00lkidd: no gun with InflictTarget")
         end
@@ -1760,14 +1769,37 @@ local function auraTick()
             end
             local hasGun = CFG._apocHasGun
             if not hasGun then
-                if not CFG._apocGiveAt
-                   or os.clock() - CFG._apocGiveAt > 4 then
+                -- v3.12: если пушки нет 12+ секунд (с вышки сервер не
+                -- выдаёт) — ОДИН флай-ин: вниз к модели, клик, назад
+                -- на вышку. Остальное время — тихо на вышке.
+                if now - (CFG._apocNoGunSince or now) > 12
+                   and not CFG._ensureBusy
+                   and os.clock() - (CFG._apocGiveAt or 0) > 15
+                   and type(G.PE.Give) == "function" then
+                    CFG._apocNoGunSince = nil
+                    CFG._apocFlyOnce = true
                     CFG._apocGiveAt = os.clock()
-                    if type(G.PE.EnsureWeapon) == "function" then
-                        G.PE.EnsureWeapon("apocalypse")
+                    CFG._ensureGiveAt = os.clock()
+                    print("[PE APOC] no gun for 12s - one fly-in give")
+                    pcall(function() G.PE.Give("M9") end)
+                    CFG._apocFlyOnce = nil
+                    CFG._apocGunAt = now
+                    CFG._apocHasGun = myGunRemote("InflictTarget") ~= nil
+                elseif not CFG._apocNoGunSince then
+                    CFG._apocNoGunSince = now
+                end
+                if not CFG._apocHasGun then
+                    if not CFG._apocGiveAt
+                       or os.clock() - CFG._apocGiveAt > 4 then
+                        CFG._apocGiveAt = os.clock()
+                        if type(G.PE.EnsureWeapon) == "function" then
+                            G.PE.EnsureWeapon("apocalypse")
+                        end
                     end
                 end
             else
+                CFG._apocNoGunSince = nil
+                -- Вышка + пушка на месте: можно воевать.
                 -- Вышка + пушка на месте: можно воевать.
                 if now - (CFG._apocTeamAt or 0) >= 1 then
                     CFG._apocTeamAt = now
@@ -1914,6 +1946,30 @@ local function auraTick()
                     end
                 end
             end
+        end
+    end
+
+    -- ANTI-FLING: резкий взлёт = флинг/наручники/подброс — якорим себя
+    -- на месте на 1.2с, скорость гасится. Ничто не может сдвинуть нас
+    -- с точки, пока держим. Ходьба/прыжки/свои телепорты не триггерят.
+    local chrAF = LP.Character
+    local rootAF = chrAF and chrAF:FindFirstChild("HumanoidRootPart")
+    if rootAF then
+        if CFG.AntiFling and not CFG.Apocalypse
+           and not CFG._immPerch then
+            local vAF = rootAF.AssemblyLinearVelocity
+            if vAF.Y > 110 and not rootAF.Anchored then
+                rootAF.Anchored = true
+                rootAF.AssemblyLinearVelocity = Vector3.zero
+                antiFlingHold = now + 1.2
+                print("[PE] anti-fling: frozen mid-fling")
+            end
+        end
+        -- Отпускание: держим 1.2с, потом мягко отпускаем. Под APOC
+        -- не вмешиваемся (у него своя вышка).
+        if rootAF.Anchored and not CFG.Apocalypse
+           and not CFG._immPerch and now > antiFlingHold then
+            pcall(function() rootAF.Anchored = false end)
         end
     end
 
@@ -4239,9 +4295,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[GERKYLES GUI] v3.11 stopped")
+    print("[GERKYLES GUI] v3.12 stopped")
 end
 
-print("[GERKYLES GUI] v3.11 started (Combat-only, PeUI built-in)"
+print("[GERKYLES GUI] v3.12 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
