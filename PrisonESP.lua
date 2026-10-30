@@ -1,5 +1,5 @@
 -- ============================================================
---  GERKYLES GUI  v3.15  (Combat-only: PeUI + друзья в ауре)s HUD + rejoin)
+--  GERKYLES GUI  v3.16  (Combat-only: перетаскиваемый Stats HUD)ья в ауре)s HUD + rejoin)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -4020,10 +4020,17 @@ task.spawn(function()
                 end
                 local pnl = Instance.new("Frame")
                 pnl.Size = UDim2.new(0, 200, 0, 100)
-                pnl.Position = UDim2.new(0, 10, 0, 10)
+                -- v3.16: позиция сохраняется после перетаскивания.
+                local savedPos = CFG.StatsHudPos
+                if type(savedPos) == "table" and savedPos.x then
+                    pnl.Position = UDim2.new(0, savedPos.x, 0, savedPos.y)
+                else
+                    pnl.Position = UDim2.new(0, 10, 0, 10)
+                end
                 pnl.BackgroundColor3 = Color3.fromRGB(17, 11, 28)
                 pnl.BackgroundTransparency = 0.25
                 pnl.BorderSizePixel = 0
+                pnl.Active = true
                 pnl.Parent = hudGui
                 local cr = Instance.new("UICorner")
                 cr.CornerRadius = UDim.new(0, 10)
@@ -4041,6 +4048,40 @@ task.spawn(function()
                 hudText.TextXAlignment = Enum.TextXAlignment.Left
                 hudText.TextYAlignment = Enum.TextYAlignment.Top
                 hudText.Parent = pnl
+                -- ПЕРЕТАСКИВАНИЕ: тянем за саму панель, позиция пишется
+                -- в CFG.StatsHudPos (переживает рестарты).
+                local dragging = false
+                local dragStart, startPos
+                hudConns[#hudConns + 1] = pnl.InputBegan:Connect(function(inp)
+                    if inp.UserInputType == Enum.UserInputType.MouseButton1
+                       or inp.UserInputType == Enum.UserInputType.Touch then
+                        dragging = true
+                        dragStart = inp.Position
+                        startPos = pnl.Position
+                    end
+                end)
+                hudConns[#hudConns + 1] = UIS.InputChanged:Connect(function(inp)
+                    if dragging and (
+                        inp.UserInputType == Enum.UserInputType.MouseMovement
+                        or inp.UserInputType == Enum.UserInputType.Touch) then
+                        local d = inp.Position - dragStart
+                        pnl.Position = UDim2.new(0,
+                            startPos.X.Offset + d.X, 0,
+                            startPos.Y.Offset + d.Y)
+                    end
+                end)
+                hudConns[#hudConns + 1] = UIS.InputEnded:Connect(function(inp)
+                    if inp.UserInputType == Enum.UserInputType.MouseButton1
+                       or inp.UserInputType == Enum.UserInputType.Touch then
+                        if dragging then
+                            dragging = false
+                            CFG.StatsHudPos = {
+                                x = pnl.Position.X.Offset,
+                                y = pnl.Position.Y.Offset,
+                            }
+                        end
+                    end
+                end)
             end
             local sess = os.clock() - (G.PE_LOADED_AT or os.clock())
             local mm = math.floor(sess / 60)
@@ -4060,6 +4101,14 @@ task.spawn(function()
                     "K: %d   D: %d\nSession: %02d:%02d\nPing: %d ms"
                         .. "  |  Online: %d\nFPS: %d",
                     stats.kills, stats.deaths, mm, ss, ping, online, fps)
+            else
+                -- Тоггл выключен: панель убираем с экрана (раньше она
+                -- оставалась висеть навсегда).
+                if hudGui then
+                    pcall(function() hudGui:Destroy() end)
+                    hudGui = nil
+                    hudText = nil
+                end
             end
         end
     end
@@ -4198,10 +4247,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[GERKYLES GUI] v3.15 stopped")
+    print("[GERKYLES GUI] v3.16 stopped")
 end
 
-print("[GERKYLES GUI] v3.15 started (Combat-only, PeUI built-in)")
+print("[GERKYLES GUI] v3.16 started (Combat-only, PeUI built-in)")
 -- Автозагрузка скрипта после телепортов/смены сервера (v3.14):
 -- фланг не теряется при хопе. Кик не ловится (среда умирает).
 if type(queue_on_teleport) == "function" then
