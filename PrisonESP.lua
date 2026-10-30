@@ -1,5 +1,5 @@
 -- ============================================================
---  GERKYLES GUI  v3.19  (Combat-only: опция авто-открытия меню)ья в ауре)s HUD + rejoin)
+--  GERKYLES GUI  v3.20  (Combat-only: PeUI + скрытое меню после хопа)ья в ауре)s HUD + rejoin)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -126,9 +126,6 @@ CFG.C00lTeam = (type(CFG.C00lTeam) == "string"
 CFG.FireAura = CFG.FireAura == true
 -- STATS HUD: панель киллы/смерти/пинг/FPS (v3.15), вкл по умолчанию.
 CFG.StatsHUD = CFG.StatsHUD ~= false
--- АВТО-ОТКРЫТИЕ меню после хопа сервера (v3.19): false = скрипт
--- загрузится скрытым, клавиша K показывает.
-CFG.AutoOpenMenu = CFG.AutoOpenMenu ~= false
 -- ANTI-FLING: резкий взлёт (флинг/наручники/подброс) = заморозка на
 -- месте на 1.2с. Ходьба, прыжки и свои телепорты не триггерят.
 CFG.AntiFling = CFG.AntiFling ~= false
@@ -2244,11 +2241,12 @@ do
         }, sg)
         corner(12, root)
         stroke(THEME.Stroke, 1, root)
-        -- v3.19: опция «не открывать меню после хопа» — окно строится
-        -- скрытым, клавиша K показывает (если AutoOpenMenu = false).
-        if CFG.AutoOpenMenu == false then
+        -- v3.20: после хопа (queue_on_teleport ставит PE_AFTER_HOP)
+        -- меню строится СКРЫТЫМ — K показывает. Ручной запуск — открыто.
+        if G.PE_AFTER_HOP then
             root.Visible = false
-            print("[PE UI] menu built hidden - press K to show")
+            G.PE_AFTER_HOP = nil
+            print("[PE UI] menu built hidden after hop - press K to show")
         end
         -- Минималистичное появление окна: лёгкий масштаб 0.97 -> 1.
         do
@@ -3839,10 +3837,6 @@ local okGUI, errGUI = pcall(function()
                 print("[PE] language = " .. PE_LANG .. " (applied live)")
             end })
         ST:CreateSection("Session")
-        ST:CreateToggle({ Name = "Open menu after server hop",
-            Flag = "PE_AutoOpenMenu",
-            CurrentValue = CFG.AutoOpenMenu ~= false,
-            Callback = function(v) CFG.AutoOpenMenu = v end })
         ST:CreateToggle({ Name = "Stats HUD (kills/ping/fps)",
             Flag = "PE_StatsHUD",
             CurrentValue = CFG.StatsHUD ~= false,
@@ -4287,15 +4281,15 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[GERKYLES GUI] v3.19 stopped")
+    print("[GERKYLES GUI] v3.20 stopped")
 end
 
-print("[GERKYLES GUI] v3.19 started (Combat-only, PeUI built-in)")
+print("[GERKYLES GUI] v3.20 started (Combat-only, PeUI built-in)")
 -- Автозагрузка скрипта после телепортов/смены сервера (v3.14):
 -- фланг не теряется при хопе. Кик не ловится (среда умирает).
 if type(queue_on_teleport) == "function" then
     pcall(function()
-        queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/blegbot1/PrisonESP/main/PrisonESP.lua"))()')
+        queue_on_teleport('getgenv().PE_AFTER_HOP = true loadstring(game:HttpGet("https://raw.githubusercontent.com/blegbot1/PrisonESP/main/PrisonESP.lua"))()')
     end)
 end
 print("[PE] console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
