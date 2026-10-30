@@ -1,5 +1,5 @@
 -- ============================================================
---  GERKYLES GUI  v3.17  (Combat-only: PeUI + живой перевод всех вкладок)ья в ауре)s HUD + rejoin)
+--  GERKYLES GUI  v3.18  (Combat-only: os.time гвард + M9 бэкофф)ья в ауре)s HUD + rejoin)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -13,7 +13,9 @@
 -- ============================================================
 
 local G = getgenv()
-if G.PE_LOADED_AT and (os.clock() - G.PE_LOADED_AT) < 5 then
+-- v3.18: os.time() вместо os.clock() — os.clock() сбрасывается при
+-- рестарте экзекутора, и гвард 5с блокировал запуск навсегда.
+if G.PE_LOADED_AT and (os.time() - G.PE_LOADED_AT) < 5 then
     warn("[PE] just started, wait 5 sec")
     return
 end
@@ -21,7 +23,7 @@ end
 if G.PE_Stop then
     pcall(function() G.PE_Stop() end)
 end
-G.PE_LOADED_AT = os.clock()
+G.PE_LOADED_AT = os.time()
 
 local Players          = game:GetService("Players")
 local RunService       = game:GetService("RunService")
@@ -663,7 +665,7 @@ G.PE.EnsureWeapon = function(tag)
     -- v2.70: под апокалипсисом гивер не может выдать пушку (тим-чек), а
     -- ретрай каждые 4 с телепортировал игрока к модели и обратно — играть
     -- было невозможно. Теперь редкий ретрай и без телепорта.
-    local gap = CFG.Apocalypse and 15 or 4
+    local gap = CFG.Apocalypse and 15 or (CFG._ensureGap or 4)
     if CFG._ensureBusy or nowE - (CFG._ensureGiveAt or 0) < gap then
         return false
     end
@@ -679,6 +681,15 @@ G.PE.EnsureWeapon = function(tag)
             if want == "GIVE ALL" then G.PE.GiveAll() else G.PE.Give(want) end
         end)
         CFG._ensureBusy = nil
+        -- v3.18: выдача «удалась», но пушка не появилась в инвентаре
+        -- (сервер отдал и забрал — так бывает в Undecided/далеко от
+        -- модели) — прогрессирующая пауза 15 -> 30 -> 60с вместо спама.
+        local got = G.PE.HasWeapon and G.PE.HasWeapon(want)
+        if got then
+            CFG._ensureGap = nil
+        elseif want ~= "GIVE ALL" then
+            CFG._ensureGap = math.min((CFG._ensureGap or 15) * 2, 60)
+        end
         -- Неудача выдачи (модель забрали с земли / нет ClickDetector):
         -- откладываем следующий ретрай на 12с, иначе сторож спамит
         -- попытками каждые 4с, когда пушек на карте просто нет.
@@ -4263,10 +4274,10 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[GERKYLES GUI] v3.17 stopped")
+    print("[GERKYLES GUI] v3.18 stopped")
 end
 
-print("[GERKYLES GUI] v3.17 started (Combat-only, PeUI built-in)")
+print("[GERKYLES GUI] v3.18 started (Combat-only, PeUI built-in)")
 -- Автозагрузка скрипта после телепортов/смены сервера (v3.14):
 -- фланг не теряется при хопе. Кик не ловится (среда умирает).
 if type(queue_on_teleport) == "function" then
