@@ -28,6 +28,12 @@ local RunService       = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CoreGui          = game:GetService("CoreGui")
 local LP               = Players.LocalPlayer
+-- v3.16: queue_on_teleport исполняет скрипт сразу после хопа, когда
+-- LocalPlayer ещё не появился (LP = nil) — раньше крашилось на 234/250.
+while not LP do
+    task.wait(0.1)
+    LP = Players.LocalPlayer
+end
 
 -- ============================================================
 --  КОНФИГ (переживает перезапуск через getgenv)
@@ -1535,7 +1541,9 @@ local function auraTick()
                     CFG._apocNoGunSince = nil
                     CFG._apocFlyOnce = true
                     CFG._apocGiveAt = os.clock()
-                    CFG._ensureGiveAt = os.clock()
+                    -- +12с: гасим и EnsureWeapon-ретраи после флай-ина
+                    -- (иначе 14 выдач за 3 секунды, как в логе v3.15).
+                    CFG._ensureGiveAt = os.clock() + 12
                     print("[PE APOC] no gun for 12s - one fly-in give")
                     pcall(function() G.PE.Give("M9") end)
                     CFG._apocFlyOnce = nil
@@ -3835,7 +3843,7 @@ local okGUI, errGUI = pcall(function()
                 end
             end })
         ST:CreateParagraph({ Title = "Version",
-            Content = "GERKYLES GUI v3.13 (Combat-only, built-in PeUI). Background: double-layer (purple base + photo panel right). Photo source: pe_bg.png in workspace (auto-download from GitHub) OR decal id above. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "GERKYLES GUI v3.16 (Combat-only, built-in PeUI). Background: double-layer (purple base + photo panel right). Photo source: pe_bg.png in workspace (auto-download from GitHub) OR decal id above. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
