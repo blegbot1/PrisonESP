@@ -3536,6 +3536,10 @@ do
 end
 
 -- Списки выбора целей: игроки + «Everyone», обновляются раз в 5с.
+-- v3.14: teamPickers объявлен ЗДЕСЬ, до сборки меню. В v3.13 его
+-- объявление удалили вместе с «мёртвым» targetPickers, и сборка падала на
+-- `teamPickers[#teamPickers + 1]` — меню не появлялось вообще.
+local teamPickers = {}
 local function teamOpts()
     local o = {}
     for _, p in ipairs(Players:GetPlayers()) do
