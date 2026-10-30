@@ -1,5 +1,5 @@
 -- ============================================================
---  GERKYLES GUI  v3.12  (Combat-only: PeUI + APOC флай-ин гивер)
+--  GERKYLES GUI  v3.13  (Combat-only: PeUI + аудит-фиксы)
 --  Тюремный RP (заключённые / охрана / преступники).
 --
 --  Боевка и движение: килл-аура (InflictTarget), прокачка пушки,
@@ -2576,9 +2576,13 @@ do
                 -- Ассет присваиваем ПОСЛЕ парентинга (как в тесте, где
                 -- фото рендерилось), с задержкой на строкновение GUI.
                 task.delay(0.2, function()
-                    pcall(function() bgImage.Image = bgSrc end)
-                    print("[PE UI] bg: image assigned, len "
-                        .. #tostring(bgSrc))
+                    -- Гард: конфиг мог восстановить PE_BG_ID (декал)
+                    -- ПОСЛЕ сборки — не перетираем его отложенным фото.
+                    if bgImage.Image == "" then
+                        bgImage.Image = bgSrc
+                        print("[PE UI] bg: image assigned, len "
+                            .. #tostring(bgSrc))
+                    end
                 end)
                 -- Инфо-лог раз в 3с (rect 0,0 у Real — НОРМА для
                 -- getcustomasset: в тесте фото рендерилось и с 0,0).
@@ -2710,7 +2714,11 @@ do
                 -- долгой игры). Скрываем: инстанс живёт вечно, память —
                 -- копейки, reopen работает всегда.
                 task.delay(0.13, function()
-                    p.Visible = false
+                    -- Гард: попап могли ПЕРЕОТКРЫТЬ быстрее 130мс —
+                    -- тогда не прячем (иначе «активен, но невидим»).
+                    if activePopup ~= p then
+                        p.Visible = false
+                    end
                 end)
             end
         end
@@ -3219,6 +3227,15 @@ do
                     else
                         el.CurrentOption = { v }
                     end
+                    -- Фильтр: мёртвые ники (ушли с сервера) не остаются
+                    -- висеть в выборе после восстановления конфига.
+                    local kept = {}
+                    for _, o in ipairs(el.CurrentOption) do
+                        if table.find(el.Options, o) then
+                            kept[#kept + 1] = o
+                        end
+                    end
+                    el.CurrentOption = kept
                     if not data.MultipleOptions then
                         el.CurrentOption = { el.CurrentOption[1] }
                         if el.CurrentOption[1] == nil then
@@ -3503,6 +3520,7 @@ do
             pcall(function() c:Disconnect() end)
         end
         PeUI._conns = {}
+        PeUI._listRefresh = nil
         if PeUI._sg then
             pcall(function() PeUI._sg:Destroy() end)
             PeUI._sg = nil
@@ -4047,7 +4065,7 @@ local okGUI, errGUI = pcall(function()
                 end
             end })
         ST:CreateParagraph({ Title = "Version",
-            Content = "GERKYLES GUI v3.10 (Combat-only, built-in PeUI). Background: double-layer (purple base + photo panel right). Photo source: pe_bg.png in workspace (auto-download from GitHub) OR decal id above. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
+            Content = "GERKYLES GUI v3.13 (Combat-only, built-in PeUI). Background: double-layer (purple base + photo panel right). Photo source: pe_bg.png in workspace (auto-download from GitHub) OR decal id above. Console tools: PE.Guns(), PE.Remotes(), PE.GunSource(), PE.Diag(), PE.Probe(...), PE.Hit(name), PE.Team(name), PE.FakeShot(), PE.EscapeTrip(), PE.WearOutfit(), PE.ShopInfo()." })
     end
 
     guiOK = true
@@ -4295,9 +4313,9 @@ G.PE_Stop = function()
     -- Заглушка вместо nil: повторный вызов PE_Stop не должен падать.
     G.PE_Stop = function() end
     G.PE_LOADED_AT = nil
-    print("[GERKYLES GUI] v3.12 stopped")
+    print("[GERKYLES GUI] v3.13 stopped")
 end
 
-print("[GERKYLES GUI] v3.12 started (Combat-only, PeUI built-in)"
+print("[GERKYLES GUI] v3.13 started (Combat-only, PeUI built-in)"
     .. " | console: PE.Guns() / PE.Remotes() / PE.Probe(...)"
     .. " / PE.Hit(\"partial name\") / PE.Team(\"Guard\") / PE.Diag()")
